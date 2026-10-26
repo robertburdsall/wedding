@@ -25,6 +25,9 @@
     return el;
   }
 
+  // A Settings cell can hold several lines: a real line break (Ctrl+Enter), " / ", or a typed "\n".
+  const cellLines = (s) => String(s || '').split(/\s*(?:\r?\n|\\n|\s\/\s)\s*/).map((l) => l.trim()).filter(Boolean);
+
   const normalizeCode = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
   function formatList(items) {
@@ -172,7 +175,7 @@
         icon,
         h('h2', { class: 'event-card__title', text: ev.title }),
         ev.date ? h('p', { class: 'event-card__line', text: ev.date }) : null,
-        ev.time ? h('p', { class: 'event-card__line', text: ev.time }) : null,
+        cellLines(ev.time).map((line) => h('p', { class: 'event-card__line', text: line })),
         ev.venue ? h('p', { class: 'event-card__venue', text: ev.venue }) : null,
         ev.address ? h('p', { class: 'event-card__address', text: ev.address }) : null,
         ev.address ? h('a', {
@@ -253,7 +256,7 @@
     wrap.replaceChildren();
     data.events.forEach((ev) => {
       wrap.append(h('fieldset', { class: 'event-choices' },
-        h('legend', {}, h('span', { text: ev.title }), h('small', { text: [ev.date, ev.time].filter(Boolean).join(' · ') })),
+        h('legend', {}, h('span', { text: ev.title }), h('small', { text: [ev.date, ...cellLines(ev.time)].filter(Boolean).join(' · ') })),
         data.guests.map((name, i) => choiceRow(fieldName(ev.id, i), name, 'Joyfully accepts', 'Regretfully declines', ev.title))));
     });
 
