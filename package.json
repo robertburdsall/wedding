@@ -1,0 +1,13 @@
+{
+  "name": "stephanie-and-robert-wedding",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/dev-server.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "photos": "node tools/optimize-photos.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}

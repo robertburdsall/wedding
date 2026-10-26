@@ -1,0 +1,51 @@
+/*
+ * THEME — every color and font on the site comes from this file.
+ * To re-theme the site, change the values in this block only.
+ */
+:root {
+  /* Palette: deep green with blush-pink undertones */
+  --green-950: #0e221a;
+  --green-900: #15322a;
+  --green-800: #1d4437;
+  --green-700: #2a5a49;
+  --green-500: #4f7f6c;
+  --pink-50:  #fdf6f6;
+  --pink-100: #f9e9eb;
+  --pink-200: #f2d3d8;
+  --pink-300: #e8b6be;
+  --pink-400: #d995a1;
+  --pink-600: #b46a79;
+  --ivory:    #fbf8f4;
+
+  /* Semantic colors (what the rest of the CSS uses) */
+  --color-bg:          var(--ivory);
+  --color-bg-alt:      var(--pink-50);
+  --color-bg-blush:    var(--pink-100);
+  --color-surface:     #ffffff;
+  --color-text:        #26302c;
+  --color-text-muted:  #5f6b66;
+  --color-heading:     var(--green-900);
+  --color-accent:      var(--pink-400);
+  --color-accent-soft: var(--pink-200);
+  --color-accent-text: var(--pink-600);
+  --color-dark:        var(--green-900);
+  --color-dark-deep:   var(--green-950);
+  --color-on-dark:     var(--pink-100);
+  --color-on-dark-muted: rgba(249, 233, 235, 0.72);
+  --color-line:        rgba(21, 50, 42, 0.14);
+  --color-error:       #a33a3a;
+  --color-success:     var(--green-700);
+
+  /* Fonts (loaded from Google Fonts in each page's <head>) */
+  --font-script: 'Pinyon Script', 'Snell Roundhand', cursive;
+  --font-serif:  'Cormorant Garamond', 'Garamond', 'Times New Roman', serif;
+  --font-sans:   'Jost', 'Helvetica Neue', Arial, sans-serif;
+
+  /* Shape & rhythm */
+  --radius-sm: 6px;
+  --radius:    14px;
+  --shadow:    0 18px 50px -24px rgba(14, 34, 26, 0.45);
+  --shadow-sm: 0 6px 20px -10px rgba(14, 34, 26, 0.35);
+  --max-width: 1120px;
+  --gutter:    clamp(16px, 4vw, 40px);
+}

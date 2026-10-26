@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stephanie &amp; Robert</title>
+  <!-- Privacy: the date, time and location are deliberately not on this public page.
+       They only appear on each guest's personal invitation. -->
+  <meta name="description" content="Stephanie and Robert are getting married!">
+  <!-- Keeps the site out of search engines. Delete this line if you want to be googleable. -->
+  <meta name="robots" content="noindex">
+  <meta property="og:title" content="Stephanie &amp; Robert">
+  <meta property="og:description" content="We're getting married!">
+  <meta name="theme-color" content="#15322a">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500&family=Pinyon+Script&display=swap">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="nav__inner">
+      <a href="#top" class="nav__brand monogram" aria-label="Back to top">S &amp; R</a>
+      <button class="nav__toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links">
+        <span class="visually-hidden">Menu</span><span></span><span></span>
+      </button>
+      <nav class="nav__links" id="nav-links" aria-label="Main">
+        <a href="#photos">Photos</a>
+        <a href="#registry">Registry</a>
+        <a href="#faq">FAQ</a>
+        <a href="#rsvp" class="nav__cta">RSVP</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero">
+      <picture class="hero__photo">
+        <source media="(min-aspect-ratio: 1/1)" srcset="images/photos/13.jpg">
+        <img src="images/photos/10.jpg" alt="Stephanie and Robert holding hands on the lawn" fetchpriority="high">
+      </picture>
+      <div class="hero__content">
+        <p class="eyebrow hero__eyebrow">We're getting married</p>
+        <h1 class="hero__names">
+          <span class="script">Stephanie</span>
+          <span class="hero__amp">&amp;</span>
+          <span class="script">Robert</span>
+        </h1>
+        <div class="divider" aria-hidden="true">✦</div>
+        <p class="hero__note">All the details are on your personal invitation.</p>
+        <a href="#rsvp" class="btn btn--light hero__cta">Open my invitation</a>
+      </div>
+      <a href="#photos" class="hero__scroll" aria-label="Scroll down"><span></span></a>
+    </section>
+
+    <!-- PHOTOS -->
+    <section class="section photos" id="photos">
+      <div class="container">
+        <p class="eyebrow eyebrow--on-dark">A few of our favorites</p>
+        <h2 class="section__title section__title--on-dark">Photos</h2>
+        <div class="gallery" id="gallery" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- REGISTRY -->
+    <section class="section registry" id="registry">
+      <div class="container container--narrow">
+        <p class="eyebrow">Gifts</p>
+        <h2 class="section__title">Registry</h2>
+        <p class="lead">Your presence is the greatest gift of all. For those who have asked, here is our registry.</p>
+        <!--
+          REGISTRY: set it up in one of two ways.
+          1. Easiest: put your registry's link (and its embed link, if it has one) in js/config.js.
+          2. If your registry site gives you an embed code (a snippet with <div> or <script> tags),
+             paste it between the two lines below.
+        -->
+        <div class="registry__embed" id="registry-embed">
+          <!-- PASTE REGISTRY EMBED CODE BELOW THIS LINE -->
+
+          <!-- PASTE REGISTRY EMBED CODE ABOVE THIS LINE -->
+        </div>
+        <div class="registry__links" id="registry-links">
+          <span class="btn btn--ghost is-pending" aria-disabled="true">Registry coming soon</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section faq" id="faq">
+      <div class="container container--narrow">
+        <p class="eyebrow">Good to know</p>
+        <h2 class="section__title">Questions &amp; Answers</h2>
+        <div class="faq__list">
+          <details>
+            <summary>What should I wear?</summary>
+            <!-- TODO: dress code -->
+            <p>We'll share the dress code soon.</p>
+          </details>
+          <details>
+            <summary>How do I RSVP?</summary>
+            <p>Every invitation comes with a personal link. Open it to see your invitation and RSVP for everyone in your party. Can't find it? Use the code on your invitation in the <a href="#rsvp">RSVP section</a> below.</p>
+          </details>
+          <details>
+            <summary>When is the RSVP deadline?</summary>
+            <p>Your personal invitation shows the RSVP deadline. The sooner you reply, the easier it is for us to plan!</p>
+          </details>
+          <details>
+            <summary>Can I bring a guest?</summary>
+            <p>Your invitation lists everyone included in it. If you've been given a plus one, you'll be able to add their name when you RSVP.</p>
+          </details>
+          <details>
+            <summary>Can I change my RSVP?</summary>
+            <p>Yes. Open your personal link again and update your response any time before the RSVP deadline.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- RSVP / FIND YOUR INVITATION -->
+    <section class="section rsvp" id="rsvp">
+      <div class="container container--narrow">
+        <p class="eyebrow eyebrow--on-dark">Kindly reply</p>
+        <h2 class="section__title section__title--on-dark">RSVP</h2>
+        <p class="lead lead--on-dark">Use the personal link we sent you, or enter the code from your invitation.</p>
+        <form class="find-invite" id="find-invite" novalidate>
+          <label for="invite-code" class="visually-hidden">Invitation code</label>
+          <input class="input find-invite__input" id="invite-code" name="code" placeholder="Invitation code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" required>
+          <button class="btn btn--light" type="submit">Find my invitation</button>
+        </form>
+        <p class="find-invite__error" id="find-invite-error" role="alert" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p class="script footer__names">Stephanie &amp; Robert</p>
+  </footer>
+
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="lightbox__close" data-action="close" aria-label="Close">&times;</button>
+    <button class="lightbox__nav lightbox__nav--prev" data-action="prev" aria-label="Previous photo">&#8249;</button>
+    <img class="lightbox__img" id="lightbox-img" alt="">
+    <button class="lightbox__nav lightbox__nav--next" data-action="next" aria-label="Next photo">&#8250;</button>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

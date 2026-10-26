@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your Invitation · Stephanie &amp; Robert</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#15322a">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=EB+Garamond:wght@400&family=Jost:wght@300;400;500&family=Monsieur+La+Doulaise&family=Pinyon+Script&display=swap">
+  <link rel="stylesheet" href="../css/theme.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/invite.css">
+</head>
+<body>
+  <header class="invite-header">
+    <a href="../" class="invite-header__brand monogram">S &amp; R</a>
+  </header>
+
+  <main id="app" data-state="loading" aria-live="polite">
+    <!-- Loading -->
+    <section class="state state--loading">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Opening your invitation…</p>
+    </section>
+
+    <!-- Problem (bad code, network, etc.) -->
+    <section class="state state--error">
+      <div class="panel">
+        <p class="eyebrow">Hmm…</p>
+        <h1 class="panel__title" id="error-title">We couldn't open that invitation</h1>
+        <p id="error-message"></p>
+        <form class="code-form" id="code-form" novalidate>
+          <label for="code-input" class="visually-hidden">Invitation code</label>
+          <input class="input code-form__input" id="code-input" placeholder="Invitation code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12">
+          <button class="btn" type="submit">Open</button>
+        </form>
+        <p><a href="../">Back to the wedding website</a></p>
+      </div>
+    </section>
+
+    <!-- The invitation -->
+    <section class="state state--invite">
+      <!-- The envelope and invitation card (see renderInvitation() in js/invite.js). -->
+      <div class="invitation-stage" id="invitation-stage"></div>
+
+      <div class="container invite-body">
+        <div class="invite-actions"><a class="btn" href="#rsvp-panel" id="rsvp-jump">RSVP</a></div>
+        <section class="events" id="events" aria-label="Event details"></section>
+
+        <section class="rsvp-panel panel" id="rsvp-panel">
+          <p class="eyebrow">Kindly reply</p>
+          <h2 class="panel__title">RSVP</h2>
+          <p class="rsvp-panel__deadline" id="rsvp-deadline"></p>
+
+          <!-- Summary of a saved response -->
+          <div class="rsvp-summary" id="rsvp-summary" hidden>
+            <p class="rsvp-summary__thanks" id="rsvp-thanks"></p>
+            <ul class="rsvp-summary__list" id="rsvp-summary-list"></ul>
+            <button type="button" class="btn btn--ghost" id="rsvp-edit">Change my response</button>
+            <p class="rsvp-closed" id="rsvp-closed" hidden></p>
+          </div>
+
+          <!-- The form -->
+          <form class="rsvp-form" id="rsvp-form" novalidate hidden>
+            <div id="rsvp-events"></div>
+
+            <fieldset class="plus-one" id="plus-one" hidden>
+              <legend>Bringing a guest?</legend>
+              <p class="plus-one__hint">Your invitation includes a plus one.</p>
+              <div class="choice-row">
+                <label class="choice"><input type="radio" name="plusone-bringing" value="yes" aria-label="Yes, I'm bringing a guest"><span>Yes, I'm bringing a guest</span></label>
+                <label class="choice"><input type="radio" name="plusone-bringing" value="no" aria-label="No guest"><span>No guest</span></label>
+              </div>
+              <div class="plus-one__details" id="plus-one-details" hidden>
+                <label for="plus-one-name" class="field-label">Your guest's full name</label>
+                <input class="input" id="plus-one-name" maxlength="80" autocomplete="off">
+                <div id="plus-one-events"></div>
+              </div>
+            </fieldset>
+
+            <p class="form-error" id="form-error" role="alert" hidden></p>
+            <div class="rsvp-form__actions">
+              <button type="submit" class="btn" id="rsvp-submit">Send RSVP</button>
+              <button type="button" class="btn btn--ghost" id="rsvp-cancel" hidden>Cancel</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="invite-footer">
+    <p class="script">Stephanie &amp; Robert</p>
+    <p><a href="../">Visit our wedding website</a></p>
+  </footer>
+
+  <script src="../js/config.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/invitation-card.js"></script>
+  <script src="../js/invite.js"></script>
+</body>
+</html>
