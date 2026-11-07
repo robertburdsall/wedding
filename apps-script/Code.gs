@@ -93,7 +93,7 @@ var SETTINGS_DEFAULTS = [
   ['Reception Venue', '', 'Only shown to Wedding + Reception guests.'],
   ['Reception Address', '', 'Only shown to Wedding + Reception guests.'],
   ['Invitation Date & Time', '', 'Both invitation cards: the date and time in words. Type normally (the card shows capitals) and put " / " where each new line starts.'],
-  ['Invitation Location', '', 'Both invitation cards: the bottom line.'],
+  ['Invitation Location', '', 'Both invitation cards: the bottom line. For two lines, put " / " or \\n between them.'],
   ['Full Invite: Hosts', 'Together with their families', 'Wedding + Reception card: the top line.'],
   ['Full Invite: Request', '', 'Wedding + Reception card: the line(s) under the hosts. Use " / " between lines.'],
   ['Full Invite: First Name', 'Stephanie', 'Wedding + Reception card: the first name, in script.'],
