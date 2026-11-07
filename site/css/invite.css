@@ -166,6 +166,17 @@ a { color: var(--color-accent-text); }
 .event-card__address { margin: 0.1rem 0 0; color: var(--color-on-dark-muted); font-size: 0.95rem; }
 .event-card__map { display: inline-block; margin-top: 0.9rem; color: var(--pink-300); font-size: 0.78rem; letter-spacing: 0.2em; text-transform: uppercase; }
 
+/* Attire: a slim band under the event cards, in the same style. */
+.attire {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  margin: -12px 0 28px; padding: 16px 22px;
+  background: var(--color-dark); color: var(--color-on-dark); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.events--single + .attire { max-width: 420px; margin-inline: auto; }
+.attire__icon { flex: none; width: 36px; height: 36px; fill: none; stroke: var(--pink-300); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.attire__label { margin: 0; font-size: 0.72rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--pink-300); }
+.attire__value { margin: 0; font-family: var(--font-serif); font-size: 1.35rem; line-height: 1.2; }
+
 /* ---------- RSVP ---------- */
 .rsvp-panel { scroll-margin-top: 20px; }
 .rsvp-panel__deadline { color: var(--color-text-muted); margin: 0 0 1.75rem; }

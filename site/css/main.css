@@ -67,7 +67,8 @@
   text-shadow: 0 4px 30px rgba(0,0,0,0.35);
 }
 .hero__amp { font-family: var(--font-serif); font-style: italic; font-size: 0.45em; color: var(--pink-300); }
-.hero__note { font-family: var(--font-serif); font-style: italic; font-size: clamp(1.1rem, 3.4vw, 1.45rem); margin: 0 0 1.75rem; color: var(--color-on-dark); }
+.hero__note { font-family: var(--font-serif); font-style: italic; font-size: clamp(1.1rem, 3.4vw, 1.45rem); margin: 0 0 0.9rem; color: var(--color-on-dark); }
+.hero__attire { margin: 0 0 1.75rem; font-size: 0.8rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--pink-200); }
 .hero__cta { box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.5); }
 
 .hero__scroll {
