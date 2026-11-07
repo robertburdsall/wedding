@@ -40,8 +40,9 @@ window.InvitationCard = (function () {
       { key: 'underNames', ...BIG, y: 1162, pitch: 57 },
       { key: 'when', ...SMALL, y: 1322, pitch: 59.5, dx: 18 },
       { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4, growUp: true },
-      // e.g. "Reception to follow", a little smaller, under the address.
-      { key: 'closing', ...SMALL, fs: 40, y: 1694, pitch: 48, dx: 4 },
+      // e.g. "Reception to follow", under the address, in the same style and size as the
+      // request lines (which are smaller in the centered layout).
+      { key: 'closing', ...SMALL, y: 1694, pitch: 48, dx: 4 },
     ],
     ceremony: [
       { key: 'intro', ...SMALL, fs: 61.4, ls: 0.4, y: 466, pitch: 70, dx: -2 },
@@ -144,7 +145,7 @@ window.InvitationCard = (function () {
         [hosts, hostYs],
         [request, Array.from({ length: requestCount }, (_, i) => firstRequest + i * CENTERED.requestPitch)],
       ]),
-      sizes: new Map([[request, CENTERED.requestFs]]),
+      sizes: new Map([[request, CENTERED.requestFs], [get('closing'), CENTERED.requestFs]]),
       namesShift: groupTop + requestHeight - NAMES_INK.top,
     };
   }
