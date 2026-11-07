@@ -157,7 +157,7 @@ var SETTINGS_DEFAULTS = [
   ['Meal Text Message', MEAL_TEXT_DEFAULT, 'Wording for the "Meal Text Message" column. You can use: {first names} {names} {meal link} {meal deadline} {code}'],
   ['Photo Code', '', 'The secret code on the table QR cards that lets guests share and see photos. Filled in automatically. Clear it to get a new one (old cards then stop working).'],
   ['Photo Uploads Until', '', 'Last day guests can add photos. Blank = no end. The timeline stays viewable either way.'],
-  ['Photo Moments', '', 'Optional: names parts of the wedding day on the photo timeline by start time, for example: 3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Dinner / 8:30 PM Dancing. Uses the Ceremony Date as the day.'],
+  ['Photo Moments', '', 'Optional: names parts of the wedding day on the photo timeline by start time, for example: 3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Reception. Uses the Ceremony Date as the day.'],
   ['Photo Folder', '', 'Filled in automatically: the Google Drive folder photos are saved to. You can paste the link to a different folder of yours instead.'],
   ['Photo Page Link', '', 'Filled in automatically: the link in the table QR codes.'],
   ['Photo Slideshow Link', '', 'Filled in automatically: open this on a TV or projector for a live slideshow of the photos.'],

@@ -1846,12 +1846,12 @@ describe('photo sharing', () => {
 
   test('photo moments come from Settings, in time order', () => {
     const env = setup();
-    setSettings(env, { 'Photo Moments': '7:00 PM Dinner / 4 pm Ceremony / 5:00 p.m. – Cocktail hour / nonsense / 13:00 PM Bad\n8:30 PM Dancing' });
+    setSettings(env, { 'Photo Moments': '7:00 PM Dinner / 4 pm Ceremony / 5:00 p.m. – Cocktail hour / nonsense / 13:00 PM Bad\n8:30 PM Reception' });
     assert.deepEqual(list(env).data.moments, [
       { time: '16:00', title: 'Ceremony' },
       { time: '17:00', title: 'Cocktail hour' },
       { time: '19:00', title: 'Dinner' },
-      { time: '20:30', title: 'Dancing' },
+      { time: '20:30', title: 'Reception' },
     ]);
   });
 

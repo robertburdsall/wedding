@@ -172,7 +172,7 @@ Only people with the **Photo Code**, which is printed on the table cards and fou
 |---|---|
 | Photo Code | The secret code on the cards. Filled in automatically. |
 | Photo Uploads Until | Last day guests can add photos, for example two weeks after the wedding. Blank = no end. The timeline stays viewable after that. |
-| Photo Moments | Optional names for parts of the day, by start time, for example `3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Dinner / 8:30 PM Dancing`. The timeline puts each photo from the wedding day (the **Ceremony Date**) under the moment it was taken in. Photos from other days are grouped by day. |
+| Photo Moments | Optional names for parts of the day, by start time, for example `3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Reception`. The timeline puts each photo from the wedding day (the **Ceremony Date**) under the moment it was taken in. Photos from other days are grouped by day. |
 | Photo Folder | Filled in automatically. Paste a link to a different Drive folder of yours if you'd rather use your own. |
 | Photo Page Link, Photo Slideshow Link, Photo Table Cards Link | Filled in automatically. Also shown by **💌 Wedding → Show photo sharing links**. |
 
