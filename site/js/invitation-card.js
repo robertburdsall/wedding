@@ -53,9 +53,10 @@ window.InvitationCard = (function () {
   // Where the names' lettering starts and ends on the template (top of the first name's loops,
   // bottom of the second name), and the line they're centered under when moved.
   const NAMES_INK = { top: 584, bottom: 1017 };
-  // The centered layout: request lines a little smaller than the template's, sitting just
-  // above the names.
-  const CENTERED = { requestFs: 40, requestPitch: 46, gapToNames: 60 };
+  // The centered layout: request lines a little smaller than the template's. `requestPlacement`
+  // sets where they sit between the hosts (0 = right under the hosts) and the names (1 = right
+  // above the names); the names themselves don't move.
+  const CENTERED = { requestFs: 40, requestPitch: 46, gapToNames: 60, gapUnderHosts: 63, requestPlacement: 0.5 };
 
   // The ceremony card's decorative ampersand, cut from the template, and the spacing around it.
   const AMP = { href: 'ampersand.png', w: 136, h: 166, y: 686, gapBefore: 29, gapAfter: -8, center: 719 };
@@ -131,10 +132,15 @@ window.InvitationCard = (function () {
     const groupHeight = requestHeight + (NAMES_INK.bottom - NAMES_INK.top);
     const groupTop = top + (bottom - top - groupHeight) / 2;
 
+    // The names stay centered as if the request lines sat right above them; the request lines
+    // are then placed part-way back up toward the hosts.
+    const nearNames = groupTop + requestCap;
+    const underHosts = top + CENTERED.gapUnderHosts;
+    const firstRequest = underHosts + (nearNames - underHosts) * CENTERED.requestPlacement;
     return {
       positions: new Map([
         [hosts, hostYs],
-        [request, Array.from({ length: requestCount }, (_, i) => groupTop + requestCap + i * CENTERED.requestPitch)],
+        [request, Array.from({ length: requestCount }, (_, i) => firstRequest + i * CENTERED.requestPitch)],
       ]),
       sizes: new Map([[request, CENTERED.requestFs]]),
       namesShift: groupTop + requestHeight - NAMES_INK.top,
