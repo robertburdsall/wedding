@@ -28,8 +28,10 @@ window.InvitationCard = (function () {
 
   const LAYOUTS = {
     full: [
-      { key: 'hosts', ...BIG, y: 356, pitch: 57, dx: -7 },
-      { key: 'request', ...SMALL, y: 419, pitch: 53 },
+      // The hosts and request lines move as one block (see topBlock below), so extra host
+      // lines keep the block centered where the template's was.
+      { key: 'hosts', ...BIG, y: 356, pitch: 57, dx: -7, block: true, templateLines: 1 },
+      { key: 'request', ...SMALL, y: 419, pitch: 53, block: true, templateLines: 2 },
       { key: 'firstName', script: true, fs: 119.2, y: 703, dx: 2, maxW: 1150, filter: EMBOSS },
       { key: 'joiner', script: true, fs: 110.5, y: 840, dx: 3, maxW: 400, filter: EMBOSS },
       { key: 'secondName', script: true, fs: 110.5, y: 993, dx: 3.5, maxW: 1150, filter: EMBOSS },
@@ -54,6 +56,48 @@ window.InvitationCard = (function () {
     for (const [k, v] of Object.entries(attrs || {})) if (v !== undefined && v !== null) node.setAttribute(k, v);
     if (text !== undefined) node.textContent = text;
     return node;
+  }
+
+  // A Settings cell can hold several lines: a real line break, " / ", or a typed "\n".
+  function splitLines(value) {
+    const items = Array.isArray(value) ? value : (value ? [value] : []);
+    return items
+      .flatMap((v) => String(v).split(/\s*(?:\r?\n|\\n|\s\/\s)\s*/))
+      .map((l) => l.trim())
+      .filter(Boolean);
+  }
+
+  // Baselines for the specs marked `block`: stacked in order, then shifted so the block's
+  // middle stays where the template's block was (one host line, two request lines).
+  function topBlock(layout, invitation) {
+    const specs = layout.filter((s) => s.block);
+    const positions = new Map();
+    if (!specs.length) return positions;
+    const stack = (counts) => {
+      const ys = [];
+      let last = null;
+      specs.forEach((s, i) => {
+        const prev = specs[i - 1];
+        const gap = prev ? s.y - (prev.y + prev.pitch * (prev.templateLines - 1)) : 0;
+        const lines = [];
+        for (let k = 0; k < counts[i]; k++) {
+          lines.push(k === 0 ? (last === null ? s.y : last + gap) : lines[k - 1] + s.pitch);
+        }
+        if (lines.length) last = lines[lines.length - 1];
+        ys.push(lines);
+      });
+      return ys;
+    };
+    const middle = (ys) => {
+      const all = ys.flat();
+      if (!all.length) return 0;
+      const capHeight = specs[ys.findIndex((l) => l.length)].fs * 0.66;
+      return (all[0] - capHeight + all[all.length - 1]) / 2;
+    };
+    const actual = stack(specs.map((s) => splitLines(invitation[s.key]).length));
+    const shift = middle(stack(specs.map((s) => s.templateLines))) - middle(actual);
+    specs.forEach((s, i) => positions.set(s, actual[i].map((y) => y + shift)));
+    return positions;
   }
 
   // Typographic apostrophes and quotes, like the printed card.
@@ -98,6 +142,7 @@ window.InvitationCard = (function () {
     for (const [x1, y1, x2, y2] of FRAME) svg.append(el('line', { x1, y1, x2, y2, stroke: '#333', 'stroke-width': 3 }));
 
     const spoken = [];
+    const blockPositions = topBlock(layout, invitation);
     for (const spec of layout) {
       if (spec.image) {
         const i = spec.image;
@@ -110,8 +155,9 @@ window.InvitationCard = (function () {
         svg.append(namesWithAmpersand(spec, String(value || ''), imageBase));
         continue;
       }
-      const lines = Array.isArray(value) ? value : (value ? [value] : []);
-      lines.forEach((line, i) => svg.append(textLine(spec, line, spec.y + i * (spec.pitch || 0))));
+      const lines = splitLines(value);
+      const ys = blockPositions.get(spec) || lines.map((_, i) => spec.y + i * (spec.pitch || 0));
+      lines.forEach((line, i) => svg.append(textLine(spec, line, ys[i])));
       spoken.push(lines.join(', '));
     }
     svg.setAttribute('aria-label', spoken.filter(Boolean).join('. '));
@@ -164,5 +210,5 @@ window.InvitationCard = (function () {
     ]).catch(() => {});
   }
 
-  return { render, fit, fontsReady, LAYOUTS };
+  return { render, fit, fontsReady, LAYOUTS, splitLines, topBlock };
 })();

@@ -1101,6 +1101,11 @@ describe('invitation cards', () => {
     assert.deepEqual(apiGet(env, { code: env.code(0) }).data.invitation.when, ['Line one', 'Line two']);
   });
 
+  test('a typed "\n" also starts a new line (e.g. two sets of hosts)', () => {
+    const env = setup({ settings: { ...CARD, 'Full Invite: Hosts': 'Mr. and Mrs. Sample One & \\n Mr. and Mrs. Sample Two' } });
+    assert.deepEqual(apiGet(env, { code: env.code(0) }).data.invitation.hosts, ['Mr. and Mrs. Sample One &', 'Mr. and Mrs. Sample Two']);
+  });
+
   test('a "/" without spaces (like 6/6) is not treated as a line break', () => {
     const env = setup({ settings: { ...CARD, 'Invitation Date & Time': 'on 6/6 at four' } });
     assert.deepEqual(apiGet(env, { code: env.code(0) }).data.invitation.when, ['on 6/6 at four']);

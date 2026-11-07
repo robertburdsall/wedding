@@ -10,7 +10,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '1.6.0';
+var VERSION = '1.7.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log' };
 
@@ -479,10 +479,10 @@ function events_(type, settings) {
   return events;
 }
 
-// Splits a setting into card lines at new lines or " / ".
+// Splits a setting into card lines at new lines, " / ", or a typed "\n".
 function lines_(v) {
   return String(v === null || v === undefined ? '' : v)
-    .split(/\s*(?:\n|\s\/\s)\s*/)
+    .split(/\s*(?:\r?\n|\\n|\s\/\s)\s*/)
     .map(function (s) { return s.trim(); })
     .filter(function (s) { return s.length > 0; });
 }
