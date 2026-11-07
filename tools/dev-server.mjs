@@ -156,7 +156,6 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
     'Full Invite: Joiner': 'to',
     'Full Invite: Second Name': 'Robert James',
     'Full Invite: Under Names': 'son of Mr. and Mrs. Example Parents',
-    'Photo Moments': '3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Reception',
     'Send RSVP Confirmations': 'Yes',
     ...settings,
     ...(process.env.DEV_SETTINGS ? JSON.parse(await readFile(process.env.DEV_SETTINGS, 'utf8')) : {}),

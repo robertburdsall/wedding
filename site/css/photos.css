@@ -71,15 +71,7 @@ body.no-scroll { overflow: hidden; }
   font-size: 0.85rem; letter-spacing: 0.08em;
 }
 
-.timeline__section { margin: 26px 0 0; }
-.timeline__heading {
-  display: flex; align-items: baseline; justify-content: center; gap: 12px; flex-wrap: wrap;
-  text-align: center; margin: 0 0 12px;
-}
-.timeline__heading::before, .timeline__heading::after { content: ''; flex: 1; min-width: 20px; max-width: 120px; height: 1px; background: var(--color-accent); opacity: 0.6; align-self: center; }
-.timeline__title { font-size: clamp(1.5rem, 5vw, 2rem); margin: 0; }
-.timeline__meta { margin: 0; font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-text-muted); flex-basis: 100%; order: 3; }
-.timeline__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.timeline__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 12px; }
 @media (min-width: 600px) { .timeline__grid { grid-template-columns: repeat(4, 1fr); gap: 6px; } }
 @media (min-width: 900px) { .timeline__grid { grid-template-columns: repeat(5, 1fr); } }
 .tile {

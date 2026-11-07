@@ -135,29 +135,15 @@
   }
 
   function renderTimeline() {
-    const sections = T.groupPhotos(photos, { moments: data.moments || [], weddingDay: data.weddingDay });
-    if (order === 'newest') {
-      sections.reverse();
-      sections.forEach((s) => s.photos.reverse());
-    }
-    shown = sections.flatMap((s) => s.photos);
-    const root = $('#timeline-sections');
-    root.textContent = '';
-    let index = 0;
-    for (const section of sections) {
-      const grid = h('div', { class: 'timeline__grid' });
-      for (const photo of section.photos) {
-        const i = index++;
-        const img = h('img', { src: imageFor(photo, 600), alt: photo.caption || (photo.from ? `Photo by ${photo.from}` : 'Wedding photo'), loading: 'lazy', decoding: 'async' });
-        retryingImage(img, photo, 600);
-        grid.append(h('button', { type: 'button', class: 'tile', 'data-id': photo.id, onclick: () => openLightbox(i) }, img));
-      }
-      root.append(h('section', { class: 'timeline__section' },
-        h('header', { class: 'timeline__heading' },
-          h('h2', { class: 'timeline__title', text: section.title }),
-          h('p', { class: 'timeline__meta', text: [section.time, plural(section.photos.length, 'photo')].filter(Boolean).join(' · ') })),
-        grid));
-    }
+    // One grid, in the order the photos were taken (or the reverse).
+    shown = order === 'newest' ? photos.slice().reverse() : photos.slice();
+    const grid = $('#timeline-grid');
+    grid.textContent = '';
+    shown.forEach((photo, i) => {
+      const img = h('img', { src: imageFor(photo, 600), alt: photo.caption || (photo.from ? `Photo by ${photo.from}` : 'Wedding photo'), loading: 'lazy', decoding: 'async' });
+      retryingImage(img, photo, 600);
+      grid.append(h('button', { type: 'button', class: 'tile', 'data-id': photo.id, onclick: () => openLightbox(i) }, img));
+    });
     $('#timeline-count').textContent = photos.length ? plural(photos.length, 'photo') : '';
     $('#timeline-empty').hidden = photos.length > 0;
     $('.timeline__bar').hidden = photos.length < 2;

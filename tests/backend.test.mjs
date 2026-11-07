@@ -1680,7 +1680,6 @@ describe('photo sharing', () => {
     assert.equal(res.ok, true);
     assert.deepEqual(res.data.photos, []);
     assert.equal(res.data.uploads.open, true);
-    assert.equal(res.data.weddingDay, '2099-06-06');
   });
 
   test('wrong photo codes count toward the brute-force limit', () => {
@@ -1842,25 +1841,6 @@ describe('photo sharing', () => {
     assert.equal(upload(env).ok, true);
     assert.equal(photoRows(env).length, 1);
     assert.match(env.logs.errors.join('\n'), /Could not share photo/);
-  });
-
-  test('photo moments come from Settings, in time order', () => {
-    const env = setup();
-    setSettings(env, { 'Photo Moments': '7:00 PM Dinner / 4 pm Ceremony / 5:00 p.m. – Cocktail hour / nonsense / 13:00 PM Bad\n8:30 PM Reception' });
-    assert.deepEqual(list(env).data.moments, [
-      { time: '16:00', title: 'Ceremony' },
-      { time: '17:00', title: 'Cocktail hour' },
-      { time: '19:00', title: 'Dinner' },
-      { time: '20:30', title: 'Reception' },
-    ]);
-  });
-
-  test('the wedding day comes from the Ceremony Date, typed or as a date', () => {
-    const env = setup();
-    setSettings(env, { 'Ceremony Date': "'Sat, Jun 6, 2099" });
-    assert.equal(list(env).data.weddingDay, '2099-06-06');
-    setSettings(env, { 'Ceremony Date': '' });
-    assert.equal(list(env).data.weddingDay, null);
   });
 
   test('photos work before "Set up sheets" adds the Photos tab', () => {

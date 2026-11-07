@@ -308,22 +308,5 @@ describe('photo page helpers (js/photo-tools.js)', () => {
     assert.equal(loadTools().photoUrl('short', 600), '');
   });
 
-  test('the timeline is split into the moments of the day, then by day', () => {
-    const tools = loadTools();
-    // Copy results out of the sandbox so deepEqual compares plain values.
-    const T = { groupPhotos: (...a) => JSON.parse(JSON.stringify(tools.groupPhotos(...a))) };
-    const at = (d, h, m) => ({ id: `p${d}${h}${m}`, takenAt: new Date(2099, 5, d, h, m).toISOString() });
-    const photos = [at(5, 18, 0), at(6, 14, 0), at(6, 16, 0), at(6, 16, 45), at(6, 19, 30), at(7, 10, 0)];
-    const sections = T.groupPhotos(photos, { moments: [{ time: '16:00', title: 'Ceremony' }, { time: '19:00', title: 'Dinner' }], weddingDay: '2099-06-06' });
-    assert.deepEqual(sections.map((s) => [s.title, s.photos.length]), [
-      [sections[0].title, 1], ['Earlier that day', 1], ['Ceremony', 2], ['Dinner', 1], [sections[4].title, 1],
-    ]);
-    assert.match(sections[0].title, /5/);
-    assert.match(sections[2].time, /4:00/);
-    // Without moments, the wedding day is one section.
-    const plain = T.groupPhotos(photos, { weddingDay: '2099-06-06' });
-    assert.deepEqual(plain.map((s) => s.photos.length), [1, 4, 1]);
-    assert.equal(plain[1].title, 'The wedding day');
-    assert.deepEqual(T.groupPhotos([], {}), []);
-  });
+
 });

@@ -157,7 +157,6 @@ var SETTINGS_DEFAULTS = [
   ['Meal Text Message', MEAL_TEXT_DEFAULT, 'Wording for the "Meal Text Message" column. You can use: {first names} {names} {meal link} {meal deadline} {code}'],
   ['Photo Code', '', 'The secret code on the table QR cards that lets guests share and see photos. Filled in automatically. Clear it to get a new one (old cards then stop working).'],
   ['Photo Uploads Until', '', 'Last day guests can add photos. Blank = no end. The timeline stays viewable either way.'],
-  ['Photo Moments', '', 'Optional: names parts of the wedding day on the photo timeline by start time, for example: 3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Reception. Uses the Ceremony Date as the day.'],
   ['Photo Folder', '', 'Filled in automatically: the Google Drive folder photos are saved to. You can paste the link to a different folder of yours instead.'],
   ['Photo Page Link', '', 'Filled in automatically: the link in the table QR codes.'],
   ['Photo Slideshow Link', '', 'Filled in automatically: open this on a TV or projector for a live slideshow of the photos.'],
@@ -924,16 +923,6 @@ function writeSetting_(c, key, value) {
   return false;
 }
 
-// "4:00 PM Ceremony / 5:00 PM Cocktail hour" → [{ time: '16:00', title: 'Ceremony' }, ...]
-function photoMoments_(settings) {
-  return lines_(setting_(settings, 'Photo Moments')).map(function (line) {
-    var m = line.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?\s*[-–—:]?\s*(.+)$/i);
-    if (!m || Number(m[1]) < 1 || Number(m[1]) > 12 || Number(m[2] || 0) > 59) return null;
-    var hour = Number(m[1]) % 12 + (m[3].toLowerCase() === 'p' ? 12 : 0);
-    return { time: ('0' + hour).slice(-2) + ':' + (m[2] || '00'), title: m[4].trim().slice(0, 60) };
-  }).filter(function (x) { return x; }).sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
-}
-
 function photoSheet_(c) {
   var sh = sheet_(c, 'photos');
   if (!sh) {
@@ -997,8 +986,6 @@ function photosPayload_(c, settings, now) {
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : (a.uploadedAt < b.uploadedAt ? -1 : 1); });
   return {
     photos: photos,
-    moments: photoMoments_(settings),
-    weddingDay: dateKey_(settings['Ceremony Date']),
     uploads: { open: uploads.open, until: uploads.deadline, untilText: uploads.deadlineText }
   };
 }

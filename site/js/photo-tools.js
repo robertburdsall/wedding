@@ -1,6 +1,6 @@
 // Helpers shared by the photo pages (photos.js, slideshow.js, cards.js):
 // reading when a photo was taken, shrinking photos before upload, building image links,
-// grouping the timeline, and drawing QR codes.
+// and drawing QR codes.
 (function (root) {
   'use strict';
 
@@ -131,54 +131,7 @@
     return template.replace('{id}', encodeURIComponent(id)).replace('{size}', String(size));
   }
 
-  /* ---------- Timeline sections ---------- */
-
-  const pad = (n) => String(n).padStart(2, '0');
-  const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const clock = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-  function formatTime(hhmm) {
-    const [h, m] = hhmm.split(':').map(Number);
-    return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  }
-
-  function formatDay(key) {
-    const [y, m, d] = key.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    const opts = { weekday: 'long', month: 'long', day: 'numeric' };
-    if (y !== new Date().getFullYear()) opts.year = 'numeric';
-    return date.toLocaleDateString(undefined, opts);
-  }
-
-  // Splits photos (already in the order they were taken) into sections:
-  // on the wedding day, by the "moments" from the Settings tab; on other days, by day.
-  // Returns [{ key, title, time, photos }].
-  function groupPhotos(photos, { moments = [], weddingDay = null } = {}) {
-    const sections = [];
-    for (const photo of photos) {
-      const taken = new Date(photo.takenAt || photo.uploadedAt);
-      const valid = !isNaN(taken.getTime());
-      const day = valid ? dayKey(taken) : 'unknown';
-      let key, title, time = '';
-      if (valid && day === weddingDay && moments.length) {
-        const now = clock(taken);
-        let i = -1;
-        moments.forEach((m, j) => { if (m.time <= now) i = j; });
-        if (i >= 0) { key = `moment:${i}`; title = moments[i].title; time = formatTime(moments[i].time); }
-        else { key = 'moment:before'; title = 'Earlier that day'; }
-      } else if (valid && day === weddingDay) {
-        key = `day:${day}`; title = 'The wedding day';
-      } else if (valid) {
-        key = `day:${day}`; title = formatDay(day);
-      } else {
-        key = 'unknown'; title = 'More photos';
-      }
-      const last = sections[sections.length - 1];
-      if (last && last.key === key) last.photos.push(photo);
-      else sections.push({ key, title, time, photos: [photo] });
-    }
-    return sections;
-  }
+  /* ---------- Timeline ---------- */
 
   function takenTime(photo) {
     const d = new Date(photo.takenAt || photo.uploadedAt);
@@ -236,7 +189,7 @@
   }
 
   root.PhotoTools = {
-    readExifDate, preparePhoto, blobToBase64, photoUrl, groupPhotos, takenTime, formatTime,
+    readExifDate, preparePhoto, blobToBase64, photoUrl, takenTime,
     qrSvg, photoPageUrl, normalizeCode, photoCodeFromPage, MAX_SIDE,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
