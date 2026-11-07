@@ -16,7 +16,8 @@ a { color: var(--color-accent-text); }
 .state { display: none; }
 #app[data-state="loading"] .state--loading,
 #app[data-state="error"] .state--error,
-#app[data-state="invite"] .state--invite { display: block; }
+#app[data-state="invite"] .state--invite,
+#app[data-state="meal"] .state--meal { display: block; }
 
 .state--loading { text-align: center; padding: 18vh var(--gutter); color: var(--color-text-muted); }
 .state--loading .spinner { margin: 0 auto 1rem; }
@@ -224,3 +225,32 @@ a { color: var(--color-accent-text); }
 .invite-footer { text-align: center; padding: 10px var(--gutter) 40px; color: var(--color-text-muted); }
 .invite-footer .script { font-size: 1.9rem; color: var(--color-dark); margin: 0; }
 .invite-footer p { margin: 0.2rem 0; }
+
+/* ---------- Dinner selection page (/meal/) ----------
+   A plain white card that echoes the invitation: corner frame lines and the two roses. */
+.meal-card {
+  position: relative; max-width: 620px; margin: 14px auto 40px;
+  margin-inline: max(var(--gutter), calc(50% - 310px));
+  background: #fff; border-radius: 4px; overflow: hidden; text-align: center;
+  box-shadow: 0 2px 6px rgba(14, 34, 26, 0.1), 0 28px 60px -30px rgba(14, 34, 26, 0.5);
+}
+.meal-card::before, .meal-card::after { content: ''; position: absolute; pointer-events: none; border-color: #333; border-style: solid; }
+.meal-card::before { top: 4.5%; left: 5%; width: 36%; height: 62%; border-width: 1.5px 0 0 1.5px; }
+.meal-card::after { bottom: 3.5%; right: 5%; width: 36%; height: 62%; border-width: 0 1.5px 1.5px 0; }
+.meal-card__floral { position: absolute; pointer-events: none; }
+.meal-card__floral--top { top: 0; right: 0; width: 40%; }
+.meal-card__floral--bottom { bottom: 0; left: 0; width: 34%; }
+.meal-card__inner { position: relative; z-index: 1; padding: max(96px, 19%) clamp(22px, 7vw, 64px) max(110px, 22%); }
+.meal-card__title { font-family: 'EB Garamond', var(--font-serif); font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; font-size: clamp(1.6rem, 5.5vw, 2.2rem); margin: 0 0 0.4rem; color: #2e2e2e; }
+.meal-card .eyebrow { margin-bottom: 0.4rem; }
+.meal-card__for { font-family: var(--font-serif); font-style: italic; font-size: 1.2rem; margin: 0 0 0.25rem; color: var(--color-text); }
+.meal-card__deadline { color: var(--color-text-muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+.meal-card__deadline:empty { display: none; }
+.meal-form { text-align: left; margin-top: 1.25rem; }
+.meal-form .field-label { margin-top: 1.5rem; }
+.meal-form__notes { min-height: 92px; resize: vertical; margin-bottom: 1.25rem; font-family: var(--font-sans); }
+.meal-row + .meal-row { border-top: 1px dashed var(--color-line); }
+.meal-empty p, .meal-summary__notes { color: var(--color-text-muted); margin: 1.25rem 0; }
+.meal-summary__thanks { font-family: var(--font-serif); font-size: 1.4rem; color: var(--color-heading); margin: 1.25rem 0 1rem; }
+.meal-summary .rsvp-summary__list { margin-bottom: 1.25rem; }
+.rsvp-summary .meal-cta { margin: 0 0 1rem; }

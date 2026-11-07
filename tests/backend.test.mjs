@@ -45,7 +45,8 @@ describe('sheet setup', () => {
     assert.deepEqual(env.ss.getSheets().map((s) => s.getName()), ['Guests', 'Summary', 'Settings', 'RSVP Log']);
     assert.deepEqual(env.ss.getSheetByName('Guests').rows()[0], [
       'Code', 'Guest Names', 'Email', 'Invite Type', 'Plus One', 'RSVP Status', 'Ceremony Attending',
-      'Reception Attending', 'Ceremony Declined', 'Reception Declined', 'Plus One Name', 'Plus One Status', 'Responded At', 'Invite Sent At', 'Invite Opened At', 'Reminder Sent At', 'Invite Link', 'Text Message', 'Party Size', 'Notes',
+      'Reception Attending', 'Ceremony Declined', 'Reception Declined', 'Plus One Name', 'Plus One Status', 'Responded At', 'Invite Sent At', 'Invite Opened At', 'Reminder Sent At', 'Invite Link', 'Text Message', 'Party Size',
+      'Meal Choices', 'Dietary Notes', 'Meals Chosen At', 'Meal Link', 'Meal Text Message', 'Notes',
     ]);
     const settingKeys = env.ss.getSheetByName('Settings').rows().map((r) => r[0]);
     assert.equal(settingKeys[0], 'Setting');
@@ -1465,6 +1466,173 @@ describe('plus one status column', () => {
     const env = setup();
     const labels = env.ss.getSheetByName('Summary').rows().map((r) => r[0]);
     for (const l of ['Plus ones coming', 'Plus ones not coming', 'Plus ones still waiting on an RSVP']) assert.ok(labels.includes(l), l);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+describe('reception dinner selection', () => {
+  const meal = (env, i, choices, notes) => apiPost(env, { action: 'meal', code: env.code(i), choices, ...(notes !== undefined ? { notes } : {}) });
+  const menu = (env, i) => apiGet(env, { action: 'meal', code: env.code(i) });
+
+  test('Wedding + Reception households get a meal link and a ready-to-send meal text; ceremony-only do not', () => {
+    const env = setup();
+    const rows = env.sheet.objects();
+    assert.equal(rows[0]['Meal Link'], `https://stephanieandrobert.test/meal/?code=${rows[0].Code}`);
+    assert.equal(rows[0]['Meal Text Message'], `Hi Alice & Bob! Please choose your dinner for our reception: ${rows[0]['Meal Link']}`);
+    for (const i of [2, 3]) {
+      assert.equal(rows[i]['Meal Link'], '');
+      assert.equal(rows[i]['Meal Text Message'], '');
+    }
+  });
+
+  test('the meal deadline appears in the meal text once set', () => {
+    const env = setup({ settings: { ...SETTINGS, 'Meal Deadline': '2099-05-01' } });
+    assert.match(env.row(0)['Meal Text Message'], /dinner for our reception by May 1, 2099: https/);
+  });
+
+  test('before anyone RSVPs for the reception, the menu has no one to choose for', () => {
+    const env = setup();
+    const d = menu(env, 0).data;
+    assert.deepEqual(d.people, []);
+    assert.deepEqual(d.options, ['North Atlantic Salmon', 'Filet Mignon']);
+    assert.equal(d.responded, false);
+    assert.equal(d.complete, false);
+    assert.equal(meal(env, 0, {}).error, 'no_reception_guests');
+  });
+
+  test('ceremony-only guests cannot open or save the dinner menu', () => {
+    const env = setup();
+    assert.equal(menu(env, 2).error, 'not_reception');
+    assert.equal(meal(env, 2, { 'Dan Brown': 'Filet Mignon' }).error, 'not_reception');
+  });
+
+  test('everyone coming to the reception (including a plus one) picks a meal, and the row shows it', () => {
+    const env = setup();
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: ['Carol Jones'] }, { name: 'Sam Plus', ceremony: true, reception: true });
+    assert.deepEqual(menu(env, 1).data.people, ['Carol Jones', 'Sam Plus']);
+    const res = meal(env, 1, { 'Carol Jones': 'Filet Mignon', 'Sam Plus': 'north atlantic salmon' }, 'Sam is allergic to shellfish');
+    assert.equal(res.ok, true, res.message);
+    const row = env.row(1);
+    assert.equal(row['Meal Choices'], 'Carol Jones: Filet Mignon; Sam Plus: North Atlantic Salmon');
+    assert.equal(row['Dietary Notes'], 'Sam is allergic to shellfish');
+    assert.ok(row['Meals Chosen At'] instanceof Date);
+    assert.deepEqual(res.data.choices, { 'Carol Jones': 'Filet Mignon', 'Sam Plus': 'North Atlantic Salmon' });
+    assert.equal(res.data.complete, true);
+  });
+
+  test('only people coming to the reception are asked (not ceremony-only members of the party)', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: ['Alice Smith', 'Bob Smith'], reception: ['Bob Smith'] });
+    assert.deepEqual(menu(env, 0).data.people, ['Bob Smith']);
+    assert.equal(meal(env, 0, { 'Alice Smith': 'Filet Mignon', 'Bob Smith': 'Filet Mignon' }).error, 'unknown_guest');
+  });
+
+  test('every reception guest must choose, and only from the menu', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith', 'Bob Smith'] });
+    assert.equal(meal(env, 0, { 'Alice Smith': 'Filet Mignon' }).error, 'meal_missing');
+    assert.match(meal(env, 0, { 'Alice Smith': 'Filet Mignon' }).message, /Bob Smith/);
+    assert.equal(meal(env, 0, { 'Alice Smith': 'Pizza', 'Bob Smith': 'Filet Mignon' }).error, 'bad_request');
+    assert.equal(meal(env, 0, { 'Alice Smith': 7, 'Bob Smith': 'Filet Mignon' }).error, 'bad_request');
+    assert.equal(apiPost(env, { action: 'meal', code: env.code(0), choices: 'all salmon' }).error, 'bad_request');
+    assert.equal(env.row(0)['Meal Choices'], '');
+  });
+
+  test('dietary notes are optional, tidied, capped and can never become a formula', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith'] });
+    assert.equal(meal(env, 0, { 'Alice Smith': 'Filet Mignon' }).ok, true);
+    assert.equal(env.row(0)['Dietary Notes'], '');
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon' }, '  gluten free\n\nno nuts  ');
+    assert.equal(env.row(0)['Dietary Notes'], 'gluten free no nuts');
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon' }, '=IMPORTXML("x")');
+    const col = env.sheet.rows()[0].indexOf('Dietary Notes') + 1;
+    assert.equal(env.sheet.getRange(2, col).getFormula(), '');
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon' }, 'x'.repeat(2000));
+    assert.equal(env.row(0)['Dietary Notes'].length, 500);
+    assert.equal(meal(env, 0, { 'Alice Smith': 'Filet Mignon' }, { evil: true }).error, 'bad_request');
+  });
+
+  test('changing meals replaces the old choices, and the menu remembers them', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith', 'Bob Smith'] });
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon', 'Bob Smith': 'Filet Mignon' });
+    meal(env, 0, { 'Alice Smith': 'North Atlantic Salmon', 'Bob Smith': 'Filet Mignon' }, 'none');
+    assert.equal(env.row(0)['Meal Choices'], 'Alice Smith: North Atlantic Salmon; Bob Smith: Filet Mignon');
+    const d = menu(env, 0).data;
+    assert.deepEqual(d.choices, { 'Alice Smith': 'North Atlantic Salmon', 'Bob Smith': 'Filet Mignon' });
+    assert.equal(d.notes, 'none');
+  });
+
+  test('if someone drops the reception later, their meal is removed', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith', 'Bob Smith'] });
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon', 'Bob Smith': 'North Atlantic Salmon' });
+    rsvp(env, 0, { ceremony: [], reception: ['Bob Smith'] });
+    assert.equal(env.row(0)['Meal Choices'], 'Bob Smith: North Atlantic Salmon');
+    const d = menu(env, 0).data;
+    assert.deepEqual(d.people, ['Bob Smith']);
+    assert.equal(d.complete, true);
+  });
+
+  test('someone newly added to the reception shows up without a meal, so the menu asks again', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: [], reception: ['Bob Smith'] });
+    meal(env, 0, { 'Bob Smith': 'North Atlantic Salmon' });
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith', 'Bob Smith'] });
+    const d = menu(env, 0).data;
+    assert.deepEqual(d.choices, { 'Bob Smith': 'North Atlantic Salmon' });
+    assert.equal(d.complete, false);
+  });
+
+  test('the meal deadline closes changes', () => {
+    const env = setup({ settings: { ...SETTINGS, 'Meal Deadline': '2001-01-01' } });
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith'] });
+    assert.equal(meal(env, 0, { 'Alice Smith': 'Filet Mignon' }).error, 'closed');
+    assert.equal(menu(env, 0).data.deadline.open, false);
+  });
+
+  test('the meal options come from the Settings tab', () => {
+    const env = setup({ settings: { ...SETTINGS, 'Meal Options': 'Chicken / Fish / Vegetarian Risotto' } });
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith'] });
+    assert.deepEqual(menu(env, 0).data.options, ['Chicken', 'Fish', 'Vegetarian Risotto']);
+    assert.equal(meal(env, 0, { 'Alice Smith': 'vegetarian risotto' }).ok, true);
+    assert.equal(env.row(0)['Meal Choices'], 'Alice Smith: Vegetarian Risotto');
+  });
+
+  test('wrong codes on the meal page count toward the guessing limit', () => {
+    const env = setup();
+    for (let i = 0; i < 60; i++) apiGet(env, { action: 'meal', code: `NOPE${i}XX` });
+    assert.equal(menu(env, 0).error, 'rate_limited');
+  });
+
+  test('meal saves are recorded in the RSVP Log', () => {
+    const env = setup();
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith'] });
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon' }, 'no nuts');
+    const log = env.ss.getSheetByName('RSVP Log').objects();
+    assert.equal(log.at(-1).Status, 'Meal choices');
+    assert.equal(log.at(-1).Ceremony, 'Alice Smith: Filet Mignon');
+  });
+
+  test('the Summary counts each meal and who still needs to choose', () => {
+    const env = setup();
+    const summary = env.ss.getSheetByName('Summary');
+    const rows = summary.rows();
+    const find = (label) => rows.findIndex((r) => r[0] === label) + 1;
+    const cols = env.sheet.rows()[0];
+    const L = String.fromCharCode(65 + cols.indexOf('Meal Choices'));
+    assert.ok(find('Meals: North Atlantic Salmon') > 0);
+    assert.equal(summary.getRange(find('Meals: Filet Mignon'), 2).getFormula(),
+      `=SUMPRODUCT((LEN('Guests'!${L}2:${L})-LEN(SUBSTITUTE('Guests'!${L}2:${L},": Filet Mignon","")))/LEN(": Filet Mignon"))`);
+    assert.match(summary.getRange(find('Reception guests who still need to choose a meal'), 2).getFormula(), /^=SUMPRODUCT\(.*'Guests'!H2:H.*\)-SUMPRODUCT\(.*";".*\)$/);
+    // The formulas' logic, checked in JS: count ": <meal>" occurrences, and entries split by ";".
+    rsvp(env, 0, { ceremony: [], reception: ['Alice Smith', 'Bob Smith'] });
+    rsvp(env, 1, { ceremony: [], reception: ['Carol Jones'] });
+    meal(env, 0, { 'Alice Smith': 'Filet Mignon', 'Bob Smith': 'North Atlantic Salmon' });
+    const all = env.sheet.objects().map((r) => String(r['Meal Choices'])).join('|');
+    assert.equal(all.split(': Filet Mignon').length - 1, 1);
+    assert.equal(all.split(': North Atlantic Salmon').length - 1, 1);
   });
 });
 

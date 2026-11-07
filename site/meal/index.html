@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dinner Selection · Stephanie &amp; Robert</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#15322a">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=EB+Garamond:wght@400;500&family=Jost:wght@300;400;500&family=Pinyon+Script&display=swap">
+  <link rel="stylesheet" href="../css/theme.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/invite.css">
+</head>
+<body>
+  <header class="invite-header">
+    <a href="../" class="invite-header__brand monogram">S &amp; R</a>
+  </header>
+
+  <main id="app" data-state="loading" aria-live="polite">
+    <section class="state state--loading">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Opening the dinner menu…</p>
+    </section>
+
+    <section class="state state--error">
+      <div class="panel">
+        <p class="eyebrow">Hmm…</p>
+        <h1 class="panel__title" id="error-title">We couldn't open the menu</h1>
+        <p id="error-message"></p>
+        <p id="error-action"></p>
+        <form class="code-form" id="code-form" novalidate>
+          <label for="code-input" class="visually-hidden">Invitation code</label>
+          <input class="input code-form__input" id="code-input" placeholder="Invitation code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12">
+          <button class="btn" type="submit">Open</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- The menu (rendered by js/meal.js) -->
+    <section class="state state--meal">
+      <div class="meal-card">
+        <img class="meal-card__floral meal-card__floral--top" src="../images/floral-top-right.png" alt="">
+        <img class="meal-card__floral meal-card__floral--bottom" src="../images/floral-bottom-left.png" alt="">
+        <div class="meal-card__inner">
+          <p class="eyebrow">Reception dinner</p>
+          <h1 class="meal-card__title">Choose your meal</h1>
+          <p class="meal-card__for" id="meal-for"></p>
+          <p class="meal-card__deadline" id="meal-deadline"></p>
+
+          <!-- Not RSVP'd for the reception yet -->
+          <div class="meal-empty" id="meal-empty" hidden>
+            <p id="meal-empty-text"></p>
+            <a class="btn" id="meal-rsvp-link" href="#">Go to your invitation</a>
+          </div>
+
+          <!-- Saved choices -->
+          <div class="meal-summary" id="meal-summary" hidden>
+            <p class="meal-summary__thanks" id="meal-thanks"></p>
+            <ul class="rsvp-summary__list" id="meal-summary-list"></ul>
+            <p class="meal-summary__notes" id="meal-summary-notes" hidden></p>
+            <button type="button" class="btn btn--ghost" id="meal-edit">Change our meals</button>
+            <p class="rsvp-closed" id="meal-closed" hidden></p>
+          </div>
+
+          <!-- The form -->
+          <form class="meal-form" id="meal-form" novalidate hidden>
+            <div id="meal-people"></div>
+            <label class="field-label" for="meal-notes">Dietary restrictions or allergies</label>
+            <textarea class="input meal-form__notes" id="meal-notes" rows="3" maxlength="500" placeholder="Let us know about any allergies or dietary needs (optional)"></textarea>
+            <p class="form-error" id="meal-error" role="alert" hidden></p>
+            <div class="rsvp-form__actions">
+              <button type="submit" class="btn" id="meal-submit">Save meals</button>
+              <button type="button" class="btn btn--ghost" id="meal-cancel" hidden>Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="invite-footer">
+    <p class="script">Stephanie &amp; Robert</p>
+    <p><a href="../">Visit our wedding website</a></p>
+  </footer>
+
+  <script src="../js/config.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/meal.js"></script>
+</body>
+</html>

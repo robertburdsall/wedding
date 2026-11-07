@@ -108,6 +108,16 @@ describe('website ↔ Apps Script over HTTP', () => {
     await assert.rejects(api.markOpened('NOPE9999'), (err) => err.code === 'not_found');
   });
 
+  test('the dinner menu loads and saves over HTTP', async () => {
+    await api.submitRsvp({ code: code(0), attendance: { ceremony: [], reception: ['Alice Smith'] } });
+    const menu = await api.getMeals(code(0));
+    assert.deepEqual(menu.people, ['Alice Smith']);
+    const saved = await api.saveMeals({ code: code(0), choices: { 'Alice Smith': 'Filet Mignon' }, notes: 'no nuts' });
+    assert.equal(saved.complete, true);
+    assert.equal(guestsRow(0)['Meal Choices'], 'Alice Smith: Filet Mignon');
+    await assert.rejects(api.getMeals(code(2)), (err) => err.code === 'not_reception');
+  });
+
   test('server errors come back as ApiError with the server message', async () => {
     await assert.rejects(api.getInvite('NOPE99'), (err) => err.code === 'not_found' && /couldn't find/.test(err.message));
     await assert.rejects(
@@ -173,7 +183,7 @@ describe('static site', () => {
   });
 
   test('every local file referenced by the HTML exists', () => {
-    for (const page of ['index.html', 'invite/index.html']) {
+    for (const page of ['index.html', 'invite/index.html', 'meal/index.html']) {
       const html = readFileSync(site(page), 'utf8');
       const refs = [...html.matchAll(/(?:href|src|srcset)="([^"#]+)"/g)].map((m) => m[1]).filter((u) => !/^(https?:|mailto:|data:)/.test(u));
       assert.ok(refs.length > 3, page);
@@ -186,7 +196,7 @@ describe('static site', () => {
   });
 
   test('the public website files contain no date, time or year', () => {
-    const files = ['index.html', 'invite/index.html', 'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js'];
+    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i, f);
@@ -212,7 +222,7 @@ describe('static site', () => {
   });
 
   test('the public site never contains guest or reception details', () => {
-    const files = ['index.html', 'invite/index.html', 'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js'];
+    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /Reception Venue|Reception Address|@gmail\.com/i, f);

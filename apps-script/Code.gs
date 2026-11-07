@@ -10,7 +10,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '1.8.0';
+var VERSION = '1.9.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log' };
 
@@ -34,13 +34,20 @@ var COL = {
   reminderAt: 'Reminder Sent At',
   link: 'Invite Link',
   text: 'Text Message',
+  mealChoices: 'Meal Choices',
+  dietary: 'Dietary Notes',
+  mealsAt: 'Meals Chosen At',
+  mealLink: 'Meal Link',
+  mealText: 'Meal Text Message',
   partySize: 'Party Size',
   notes: 'Notes'
 };
 var GUEST_HEADERS = [COL.code, COL.names, COL.email, COL.type, COL.plusOne, COL.status, COL.ceremony,
-  COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt, COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize, COL.notes];
+  COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt, COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize,
+  COL.mealChoices, COL.dietary, COL.mealsAt, COL.mealLink, COL.mealText, COL.notes];
 var AUTO_HEADERS = [COL.code, COL.status, COL.ceremony, COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt,
-  COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize];
+  COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize,
+  COL.mealChoices, COL.dietary, COL.mealsAt, COL.mealLink, COL.mealText];
 var GUEST_HEADER_NOTES = {
   'Code': 'Filled in automatically. Each household gets a unique code for its personal invite link.',
   'Guest Names': 'Everyone on this invitation, written the way it goes on the envelope. "Mr. & Mrs. John Smith" counts as two people (Mr. John Smith and Mrs. John Smith). Separate other people with commas: "Mr. & Mrs. John Smith, Miss Emma Smith".',
@@ -57,6 +64,11 @@ var GUEST_HEADER_NOTES = {
   'Plus One Status': 'Filled in automatically for households offered a plus one: Waiting for RSVP, Bringing a guest, or Not bringing a guest. Blank = no plus one offered.',
   'Invite Link': 'Filled in automatically. The personal link for this household.',
   'Text Message': 'Filled in automatically: a ready-to-send text with their link. Copy it into your phone. Change the wording on the Settings tab.',
+  'Meal Choices': 'Filled in automatically from the meal page: what each reception guest is eating.',
+  'Dietary Notes': 'Filled in automatically: dietary restrictions or allergies the guest typed on the meal page.',
+  'Meals Chosen At': 'Filled in automatically when the household saves its meal choices.',
+  'Meal Link': 'Filled in automatically for Wedding + Reception households: their personal meal page.',
+  'Meal Text Message': 'Filled in automatically: a ready-to-send text with their meal link. Change the wording on the Settings tab.',
   'Invite Sent At': 'Filled in when the invite is emailed, or when you use Wedding → Mark selected rows as invited (texted).',
   'Invite Opened At': 'Filled in automatically the first time this household taps open the envelope on their invitation (or RSVPs). Blank = not opened yet. Link previews in texts and emails do not count. Opening it yourself to test does, so clear the cell afterwards.'
 };
@@ -77,6 +89,8 @@ var LOOKUP_WINDOW_MS = 10 * 60 * 1000;
 
 // At most one confirmation/notification email per household in this many seconds.
 var EMAIL_COOLDOWN_SECONDS = 10 * 60;
+
+var MEAL_TEXT_DEFAULT = 'Hi {first names}! Please choose your dinner for our reception{meal deadline}: {meal link}';
 
 var TEXT_TEMPLATE_DEFAULT = "Hi {first names}! We're getting married and would love for you to join us for {events}. " +
   "{plus one}Here's your invitation, where you can RSVP{deadline}: {link}";
@@ -110,7 +124,10 @@ var SETTINGS_DEFAULTS = [
   ['Reminder Email Subject', "Reminder: please RSVP for Stephanie & Robert's wedding", ''],
   ['Send RSVP Confirmations', 'Yes', 'Yes = email guests a copy of their RSVP.'],
   ['Notify Email', '', 'Get an email here every time someone RSVPs. Blank = off.'],
-  ['Text Message', TEXT_TEMPLATE_DEFAULT, 'Wording for the "Text Message" column on the Guests tab. You can use: {first names} {names} {date} {events} {plus one} {deadline} {link} {code}']
+  ['Text Message', TEXT_TEMPLATE_DEFAULT, 'Wording for the "Text Message" column on the Guests tab. You can use: {first names} {names} {date} {events} {plus one} {deadline} {link} {code}'],
+  ['Meal Options', 'North Atlantic Salmon / Filet Mignon', 'The dinner choices for reception guests, separated by " / ". After changing them, run Wedding → Set up sheets so the Summary counts them.'],
+  ['Meal Deadline', '', 'Last day reception guests can choose or change their meals. Blank = no deadline.'],
+  ['Meal Text Message', MEAL_TEXT_DEFAULT, 'Wording for the "Meal Text Message" column. You can use: {first names} {names} {meal link} {meal deadline} {code}']
 ];
 
 /* =====================================================================
@@ -184,7 +201,7 @@ function parseBody_(e) {
 function handleGet_(c, params, now) {
   var action = String(params.action || 'invite');
   if (action === 'ping') return { version: VERSION };
-  if (action !== 'invite' && action !== 'opened') fail_('bad_request', 'Unknown action.');
+  if (action !== 'invite' && action !== 'opened' && action !== 'meal') fail_('bad_request', 'Unknown action.');
 
   var settings = readSettings_(c);
   var table = readGuests_(c);
@@ -195,12 +212,14 @@ function handleGet_(c, params, now) {
     markOpened_(table, guest, now);
     return { opened: true };
   }
+  if (action === 'meal') return mealPayload_(guest, settings, now);
   return invitePayload_(guest, settings, now);
 }
 
 function handlePost_(c, body, now) {
-  if (body.action !== 'rsvp') fail_('bad_request', 'Unknown action.');
-  return submitRsvp_(c, body, now);
+  if (body.action === 'rsvp') return submitRsvp_(c, body, now);
+  if (body.action === 'meal') return submitMeals_(c, body, now);
+  fail_('bad_request', 'Unknown action.');
 }
 
 /* =====================================================================
@@ -252,7 +271,12 @@ function guestFromRow_(row, cols, rowNumber) {
     openedAt: get('openedAt'),
     reminderAt: get('reminderAt'),
     link: String(get('link')).trim(),
-    text: String(get('text'))
+    text: String(get('text')),
+    mealChoicesRaw: String(get('mealChoices')).trim(),
+    dietary: String(get('dietary')).trim(),
+    mealsAt: get('mealsAt'),
+    mealLink: String(get('mealLink')).trim(),
+    mealText: String(get('mealText'))
   };
 }
 
@@ -448,7 +472,11 @@ function dateKeyText_(key) {
 }
 
 function rsvpInfo_(settings, now) {
-  var key = dateKey_(settings['RSVP Deadline']);
+  return deadlineInfo_(settings, 'RSVP Deadline', now);
+}
+
+function deadlineInfo_(settings, setting, now) {
+  var key = dateKey_(settings[setting]);
   if (!key) return { deadline: null, deadlineText: '', open: true };
   var today = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   return { deadline: key, deadlineText: dateKeyText_(key), open: today <= key };
@@ -647,6 +675,7 @@ function submitRsvp_(c, body, now) {
     g.respondedAt = now;
     writeRow_(table, g.row, declined_(g));
     writeRow_(table, g.row, { plusOneStatus: plusOneStatus_(g) });
+    pruneMeals_(table, g);
     markOpened_(table, g, now);
 
     appendLog_(c, now, g, body);
@@ -663,6 +692,124 @@ function submitRsvp_(c, body, now) {
     console.error('RSVP email failed: ' + (err && err.message ? err.message : err));
   }
   return result;
+}
+
+/* =====================================================================
+ * Meals (reception guests choose dinner on /meal/?code=…)
+ * ===================================================================== */
+
+function mealOptions_(settings) {
+  return lines_(setting_(settings, 'Meal Options'));
+}
+
+// "Name: Meal; Name: Meal" ↔ list of { name, meal }.
+function parseMeals_(raw) {
+  var out = [];
+  String(raw || '').split(';').forEach(function (part) {
+    var i = part.lastIndexOf(':');
+    if (i < 0) return;
+    var name = part.slice(0, i).trim();
+    var meal = part.slice(i + 1).trim();
+    if (name && meal) out.push({ name: name, meal: meal });
+  });
+  return out;
+}
+
+function formatMeals_(list) {
+  return list.map(function (m) { return m.name + ': ' + m.meal; }).join('; ');
+}
+
+// The saved choices that still apply: only people currently coming to the reception, in that order.
+function currentMeals_(g) {
+  var saved = parseMeals_(g.mealChoicesRaw);
+  var out = [];
+  g.reception.forEach(function (person) {
+    var m = saved.filter(function (s) { return sameName_(s.name, person); })[0];
+    if (m) out.push({ name: person, meal: m.meal });
+  });
+  return out;
+}
+
+// After an RSVP change, drop meal choices for anyone no longer coming to the reception.
+function pruneMeals_(table, g) {
+  if (table.cols.mealChoices < 0 || !g.mealChoicesRaw) return;
+  var kept = formatMeals_(currentMeals_(g));
+  if (kept !== g.mealChoicesRaw) {
+    writeRow_(table, g.row, { mealChoices: kept });
+    g.mealChoicesRaw = kept;
+  }
+}
+
+function mealPayload_(g, settings, now) {
+  if (g.type !== 'full') fail_('not_reception', 'This dinner menu is only for guests invited to the reception.');
+  var chosen = currentMeals_(g);
+  var choices = {};
+  chosen.forEach(function (m) { choices[m.name] = m.meal; });
+  return {
+    code: g.code,
+    addressee: addressee_(g),
+    responded: hasResponded_(g),
+    people: g.reception.slice(),
+    options: mealOptions_(settings),
+    choices: choices,
+    complete: g.reception.length > 0 && chosen.length === g.reception.length,
+    notes: g.dietary,
+    deadline: deadlineInfo_(settings, 'Meal Deadline', now)
+  };
+}
+
+function submitMeals_(c, body, now) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var settings = readSettings_(c);
+    var table = readGuests_(c);
+    var g = lookupGuest_(table, body.code, now);
+    if (g.type !== 'full') fail_('not_reception', 'This dinner menu is only for guests invited to the reception.');
+    var info = deadlineInfo_(settings, 'Meal Deadline', now);
+    if (!info.open) fail_('closed', 'Meal choices closed on ' + info.deadlineText + '. Please contact Stephanie or Robert directly.');
+    if (!g.reception.length) fail_('no_reception_guests', 'Please RSVP for the reception first, then choose your meals here.');
+    var options = mealOptions_(settings);
+    if (!options.length) fail_('setup', 'The dinner menu is not set up yet. Please check back soon.');
+
+    var raw = body.choices;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail_('bad_request', 'Invalid meal choices.');
+    var picked = {};
+    Object.keys(raw).forEach(function (name) {
+      var person = g.reception.filter(function (p) { return sameName_(p, name); })[0];
+      if (!person) fail_('unknown_guest', '"' + cleanName_(name) + '" is not coming to the reception on this invitation.');
+      var meal = typeof raw[name] === 'string' ? options.filter(function (o) { return sameName_(o, raw[name]); })[0] : null;
+      if (!meal) fail_('bad_request', 'Please choose one of the menu options for ' + person + '.');
+      picked[person] = meal;
+    });
+    var missing = g.reception.filter(function (p) { return !picked[p]; });
+    if (missing.length) fail_('meal_missing', 'Please choose a meal for ' + formatList_(missing) + '.');
+
+    if (body.notes !== undefined && body.notes !== null && typeof body.notes !== 'string') fail_('bad_request', 'Invalid dietary notes.');
+    var notes = String(body.notes || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+
+    var list = g.reception.map(function (p) { return { name: p, meal: picked[p] }; });
+    g.mealChoicesRaw = formatMeals_(list);
+    g.dietary = notes;
+    g.mealsAt = now;
+    writeRow_(table, g.row, { mealChoices: g.mealChoicesRaw, dietary: notes, mealsAt: now });
+    logMeals_(c, now, g, body);
+    SpreadsheetApp.flush();
+    return mealPayload_(g, settings, now);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function logMeals_(c, now, g, body) {
+  var sh = sheet_(c, 'log');
+  if (!sh) {
+    sh = c.ss.insertSheet(c.names.log);
+    sh.appendRow(['Time', 'Code', 'Guest Names', 'Status', 'Ceremony', 'Reception', 'Raw Response']);
+    sh.setFrozenRows(1);
+  }
+  sh.appendRow([now, g.code, safeText_(g.names.join(', ')), 'Meal choices', safeText_(g.mealChoicesRaw),
+    safeText_(g.dietary), safeText_(JSON.stringify(body).slice(0, 2000))]);
 }
 
 function writeRow_(table, rowNumber, values) {
@@ -730,6 +877,28 @@ function textMessage_(g, settings) {
   }).replace(/ {2,}/g, ' ').trim();
 }
 
+function mealLink_(settings, code) {
+  var base = String(setting_(settings, 'Site URL')).replace(/\/+$/, '');
+  return base + '/meal/?code=' + code;
+}
+
+// The ready-to-send meal text, for Wedding + Reception households only.
+function mealText_(g, settings) {
+  if (!g.code || g.type !== 'full' || !g.names.length) return '';
+  var template = String(setting_(settings, 'Meal Text Message')) || MEAL_TEXT_DEFAULT;
+  var deadline = dateKey_(settings['Meal Deadline']);
+  var values = {
+    'first names': firstNames_(g.entries && g.entries.length ? g.entries : g.names),
+    'names': addressee_(g),
+    'meal link': mealLink_(settings, g.code),
+    'meal deadline': deadline ? ' by ' + dateKeyText_(deadline) : '',
+    'code': g.code
+  };
+  return template.replace(/\{(first names|names|meal link|meal deadline|code)\}/gi, function (m, key) {
+    return values[key.toLowerCase()];
+  }).replace(/ {2,}/g, ' ').trim();
+}
+
 function inviteLink_(settings, code) {
   var base = String(setting_(settings, 'Site URL')).replace(/\/+$/, '');
   return base + '/invite/?code=' + code;
@@ -763,6 +932,12 @@ function generateCodes_(c, onlyRows) {
     if (table.cols.partySize >= 0 && Number(g.partySizeRaw) !== g.names.length) values.partySize = g.names.length;
     var text = textMessage_(g, settings);
     if (table.cols.text >= 0 && g.text !== text) values.text = text;
+    var mealLink = g.type === 'full' ? mealLink_(settings, g.code) : '';
+    if (table.cols.mealLink >= 0 && g.mealLink !== mealLink) values.mealLink = mealLink;
+    var mealText = mealText_(g, settings);
+    if (table.cols.mealText >= 0 && g.mealText !== mealText) values.mealText = mealText;
+    var meals = formatMeals_(currentMeals_(g));
+    if (table.cols.mealChoices >= 0 && g.mealChoicesRaw && g.mealChoicesRaw !== meals) values.mealChoices = meals;
     var dec = declined_(g);
     if (table.cols.ceremonyDeclined >= 0 && g.ceremonyDeclined !== dec.ceremonyDeclined) values.ceremonyDeclined = dec.ceremonyDeclined;
     if (table.cols.receptionDeclined >= 0 && g.receptionDeclined !== dec.receptionDeclined) values.receptionDeclined = dec.receptionDeclined;
@@ -1026,7 +1201,7 @@ function setupSheets_(c) {
       cell.setBackground('#4f7f6c');
       guests.getRange(2, col, maxRows - 1, 1).setBackground('#f4f6f5');
     }
-    var widths = { 'Guest Names': 260, 'Email': 220, 'Invite Type': 160, 'Ceremony Attending': 220, 'Reception Attending': 220, 'Ceremony Declined': 200, 'Reception Declined': 200, 'Plus One Status': 170, 'Invite Link': 280, 'Text Message': 420, 'Notes': 220 };
+    var widths = { 'Guest Names': 260, 'Email': 220, 'Invite Type': 160, 'Ceremony Attending': 220, 'Reception Attending': 220, 'Ceremony Declined': 200, 'Reception Declined': 200, 'Plus One Status': 170, 'Invite Link': 280, 'Text Message': 420, 'Meal Choices': 360, 'Dietary Notes': 260, 'Meal Link': 280, 'Meal Text Message': 380, 'Notes': 220 };
     guests.setColumnWidth(col, widths[h] || 130);
   });
   var typeCol = header.indexOf(COL.type) + 1;
@@ -1036,7 +1211,7 @@ function setupSheets_(c) {
   guests.getRange(2, plusCol, maxRows - 1, 1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(['Yes', 'No'], true).setAllowInvalid(true).build());
   guests.getRange(2, header.indexOf(COL.code) + 1, maxRows - 1, 1).setNumberFormat('@');
-  ['respondedAt', 'sentAt', 'openedAt', 'reminderAt'].forEach(function (k) {
+  ['respondedAt', 'sentAt', 'openedAt', 'reminderAt', 'mealsAt'].forEach(function (k) {
     guests.getRange(2, header.indexOf(COL[k]) + 1, maxRows - 1, 1).setNumberFormat('mmm d, yyyy h:mm am/pm');
   });
 
@@ -1100,8 +1275,19 @@ function setupSheets_(c) {
     ['', ''],
     ['Plus ones coming', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.bringing + '")'],
     ['Plus ones not coming', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.notBringing + '")'],
-    ['Plus ones still waiting on an RSVP', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.waiting + '")']
+    ['Plus ones still waiting on an RSVP', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.waiting + '")'],
+    ['', '']
   ];
+  // One row per meal option, counted from "Name: Meal" entries, then who still has to choose.
+  var settingsNow = readSettings_(c);
+  mealOptions_(settingsNow).forEach(function (opt) {
+    var r = col(COL.mealChoices);
+    var needle = '": ' + opt.replace(/"/g, '""') + '"';
+    rows.push(['Meals: ' + opt, '=SUMPRODUCT((LEN(' + r + ')-LEN(SUBSTITUTE(' + r + ',' + needle + ',"")))/LEN(' + needle + '))']);
+  });
+  var mealsRange = col(COL.mealChoices);
+  rows.push(['Reception guests who still need to choose a meal',
+    people(COL.reception) + '-SUMPRODUCT((LEN(TRIM(' + mealsRange + '))>0)*(LEN(' + mealsRange + ')-LEN(SUBSTITUTE(' + mealsRange + ',";",""))+1))']);
   summary.getRange(1, 1, rows.length, 2).setValues(rows);
   summary.getRange(1, 1).setFontSize(18).setFontWeight('bold').setFontColor('#15322a');
   summary.getRange(14, 1, 4, 2).setFontWeight('bold').setBackground('#f9e9eb');

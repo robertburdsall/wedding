@@ -61,6 +61,22 @@ window.WeddingAPI = (function () {
     return request(url.toString(), { method: 'GET' });
   }
 
+  // The reception dinner menu: who's choosing, the options, and any saved choices.
+  async function getMeals(code) {
+    const url = new URL(apiUrl());
+    url.searchParams.set('action', 'meal');
+    url.searchParams.set('code', code);
+    return request(url.toString(), { method: 'GET' });
+  }
+
+  async function saveMeals(payload) {
+    return request(apiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'meal', ...payload }),
+    });
+  }
+
   async function submitRsvp(payload) {
     return request(apiUrl(), {
       method: 'POST',
@@ -69,5 +85,5 @@ window.WeddingAPI = (function () {
     });
   }
 
-  return { getInvite, markOpened, submitRsvp, ApiError };
+  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, ApiError };
 })();

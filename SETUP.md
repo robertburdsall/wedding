@@ -137,6 +137,18 @@ Tips:
 
 The email tools still work for anyone you'd rather email: **Email invites to selected rows**, **Email all unsent invites** and **Email RSVP reminders**. Use **Email a test invite to myself** first to see what it looks like. Free Gmail accounts can send to about 100 recipients a day from scripts. If you hit the limit, it stops cleanly and picks up where it left off the next day.
 
+## Reception dinner choices
+
+Every *Wedding + Reception* household also gets a **Meal Link** (`yourdomain.com/meal/?code=…`, using the same personal code) and a ready-to-send **Meal Text Message**.
+
+- The meal page lists everyone in the household who accepted the reception, including a plus one who's coming. Each person picks a meal, and there's one box for dietary restrictions or allergies.
+- If they haven't RSVP'd for the reception yet, the page asks them to do that first and links to their invitation. Guests who just RSVP'd for the reception also see a **Choose your dinner** button on their invitation.
+- Their choices fill in **Meal Choices** (for example `Mr. John Smith: Filet Mignon; Mrs. John Smith: North Atlantic Salmon`), **Dietary Notes** and **Meals Chosen At**. They can reopen the link and change their choices until the **Meal Deadline**, if you set one.
+- If someone later drops the reception on their RSVP, their meal is removed automatically. Someone newly added to the reception shows up on the meal page without a choice, so they'll be asked again.
+- The **Summary** shows a count for each meal and how many reception guests still need to choose.
+- The choices come from **Meal Options** on the Settings tab (`North Atlantic Salmon / Filet Mignon`). If the caterer changes the menu, edit that cell and run **💌 Wedding → Set up sheets** so the Summary counts the new options.
+- Ceremony-only guests can't open the meal page.
+
 ## Updating the script later
 
 Whenever a new version of `apps-script/Code.gs` comes along:

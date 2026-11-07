@@ -233,6 +233,11 @@
       });
     }
 
+    // Reception guests choose their dinner on the meal page.
+    const dinner = invite.type === 'full' && response.responded && attendingFor('reception').length > 0;
+    $('#meal-cta').hidden = !dinner;
+    if (dinner) $('#meal-cta-link').href = `../meal/?code=${encodeURIComponent(invite.code)}`;
+
     $('#rsvp-edit').hidden = !rsvp.open;
     $('#rsvp-closed').hidden = rsvp.open;
     $('#rsvp-closed').textContent = 'RSVPs are closed. If something has changed, please reach out to Stephanie or Robert directly.';
