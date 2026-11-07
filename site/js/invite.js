@@ -178,7 +178,7 @@
         cellLines(ev.time).map((line) => h('p', { class: 'event-card__line', text: line })),
         ev.venue ? h('p', { class: 'event-card__venue', text: ev.venue }) : null,
         ev.address ? h('p', { class: 'event-card__address', text: ev.address }) : null,
-        h('p', { class: 'event-card__attire', text: 'Cocktail attire' }),
+        h('p', { class: 'event-card__attire', text: 'Attire: Cocktail' }),
         ev.address ? h('a', {
           class: 'event-card__map', target: '_blank', rel: 'noopener',
           href: `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`, text: 'Get directions',
