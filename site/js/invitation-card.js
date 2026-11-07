@@ -25,6 +25,9 @@ window.InvitationCard = (function () {
   const SMALL = { font: SERIF, fs: 46.2, ls: -0.5, maxW: 1150, filter: 'url(#ic-soft)' };
   const BIG = { ...SMALL, fs: 49.2, ls: 0.3 };
   const EMBOSS = 'url(#ic-emboss)';
+  // When the location has two or more lines, the first (the venue, e.g. a church's name) is set
+  // larger, slightly heavier and more widely spaced so it stands out from the city line.
+  const VENUE = { fs: 54, ls: 3.5, weight: 500, gap: 62 };
 
   const LAYOUTS = {
     full: [
@@ -39,7 +42,7 @@ window.InvitationCard = (function () {
       { key: 'secondName', script: true, fs: 110.5, y: 993, dx: 3.5, maxW: 1150, filter: EMBOSS, names: true },
       { key: 'underNames', ...BIG, y: 1162, pitch: 57 },
       { key: 'when', ...SMALL, y: 1322, pitch: 59.5, dx: 18 },
-      { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4, growUp: true },
+      { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4, growUp: true, featureFirst: VENUE },
       // e.g. "Reception to follow", under the address, in the same style and size as the
       // request lines (which are smaller in the centered layout).
       { key: 'closing', ...SMALL, y: 1694, pitch: 48, dx: 4 },
@@ -50,7 +53,7 @@ window.InvitationCard = (function () {
       { key: 'title', ...SMALL, fs: 79.5, ls: 2.2, y: 974, dx: -15.5, filter: 'url(#ic-lift)' },
       { key: 'ornament', image: { href: 'ornament-blossoms.png', x: 538, y: 1026, w: 354, h: 112 } },
       { key: 'when', ...SMALL, fs: 45.5, ls: 0.1, y: 1330, pitch: 59.5, dx: 3.5 },
-      { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4, growUp: true },
+      { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4, growUp: true, featureFirst: VENUE },
     ],
   };
   // Where the names' lettering starts and ends on the template (top of the first name's loops,
@@ -175,6 +178,7 @@ window.InvitationCard = (function () {
       'text-anchor': 'middle',
       'font-family': spec.script ? SCRIPT : spec.font,
       'font-size': spec.fs,
+      'font-weight': spec.weight,
       'letter-spacing': spec.script ? undefined : spec.ls,
       fill: INK,
       filter: spec.filter,
@@ -208,12 +212,22 @@ window.InvitationCard = (function () {
         continue;
       }
       const lines = splitLines(value);
-      // `growUp` lines keep their last line on the template's baseline (extra lines go above).
-      const first = spec.growUp ? spec.y - (lines.length - 1) * (spec.pitch || 0) : spec.y;
-      const ys = positions.get(spec) || lines.map((_, i) => first + i * (spec.pitch || 0) + (spec.names ? namesShift : 0));
+      const feature = spec.featureFirst && lines.length > 1 ? spec.featureFirst : null;
+      let ys = positions.get(spec);
+      if (!ys && spec.growUp) {
+        // Keep the last line on the template's baseline; extra lines stack upward.
+        ys = new Array(lines.length);
+        for (let i = lines.length - 1; i >= 0; i--) {
+          ys[i] = i === lines.length - 1 ? spec.y : ys[i + 1] - (i === 0 && feature ? feature.gap : spec.pitch);
+        }
+      }
+      if (!ys) ys = lines.map((_, i) => spec.y + i * (spec.pitch || 0) + (spec.names ? namesShift : 0));
       const size = centered && centered.sizes.get(spec);
       const lineSpec = size ? { ...spec, fs: size } : spec;
-      lines.forEach((line, i) => svg.append(textLine(lineSpec, line, ys[i])));
+      lines.forEach((line, i) => {
+        const styled = i === 0 && feature ? { ...lineSpec, fs: feature.fs, ls: feature.ls, weight: feature.weight } : lineSpec;
+        svg.append(textLine(styled, line, ys[i]));
+      });
       spoken.push(lines.join(', '));
     }
     svg.setAttribute('aria-label', spoken.filter(Boolean).join('. '));
@@ -262,6 +276,7 @@ window.InvitationCard = (function () {
     if (!document.fonts || !document.fonts.load) return Promise.resolve();
     return Promise.all([
       document.fonts.load(`400 50px 'EB Garamond'`),
+      document.fonts.load(`500 50px 'EB Garamond'`),
       document.fonts.load(`100px 'Monsieur La Doulaise'`),
     ]).catch(() => {});
   }
