@@ -210,7 +210,21 @@
   let picked = [];
   const sheet = $('#share-sheet');
 
-  $('#photo-input').addEventListener('change', (e) => {
+  // Phones and tablets get a "Take a photo" button that opens the camera straight away
+  // (the `capture` attribute). Computers just get the file chooser, which is all `capture`
+  // would give them anyway.
+  const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  if (touch) {
+    $('#camera-button').hidden = false;
+    $('#choose-button').classList.add('btn--ghost');
+    $('#choose-label').textContent = 'Choose photos';
+    $('#photos-hint').textContent = 'No app needed. Take one now, or pick some from your camera roll.';
+  }
+
+  $('#camera-input').addEventListener('change', onPicked);
+  $('#photo-input').addEventListener('change', onPicked);
+
+  function onPicked(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     const images = files.filter((f) => !f.type || f.type.startsWith('image/'));
@@ -224,7 +238,7 @@
     if (skipped) note = `${plural(skipped, 'video')} left out: only photos can be shared here.`;
     if (images.length > MAX_PER_PICK) note = `You can share up to ${MAX_PER_PICK} at a time, so we'll start with the first ${MAX_PER_PICK}.`;
     openSheet(note);
-  });
+  }
 
   function openSheet(note) {
     $('#share-title').textContent = `Share ${plural(picked.length, 'photo')}`;

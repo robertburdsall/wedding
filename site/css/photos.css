@@ -22,7 +22,9 @@ body.no-scroll { overflow: hidden; }
 .photos-hero__text { font-family: var(--font-serif); font-size: 1.2rem; line-height: 1.45; margin: 0 auto 1.5rem; max-width: 26ch; color: var(--color-text); }
 .photos-add { min-height: 56px; padding-inline: 2.2em; font-size: 0.9rem; }
 .photos-add svg { margin-top: -2px; }
-#add-area:has(#photo-input:focus-visible) .photos-add { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.photos-actions { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.photos-actions .photos-add { width: min(100%, 290px); }
+.photos-add:has(+ input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 .photos-hint { margin: 0.8rem 0 0; font-size: 0.85rem; color: var(--color-text-muted); }
 .photos-closed { font-family: var(--font-serif); font-style: italic; font-size: 1.1rem; color: var(--color-text-muted); margin: 0; }
 
