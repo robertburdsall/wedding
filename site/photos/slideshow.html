@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photo Slideshow · Stephanie &amp; Robert</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Jost:wght@300;400&family=Pinyon+Script&display=swap">
+  <link rel="stylesheet" href="../css/theme.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <style>
+    html, body { height: 100%; }
+    body { background: var(--green-950); color: var(--color-on-dark); overflow: hidden; cursor: default; }
+    body.idle { cursor: none; }
+    .show { position: fixed; inset: 0; }
+    .slide {
+      position: absolute; inset: 0; display: grid; place-items: center; opacity: 0;
+      transition: opacity 1.6s ease;
+    }
+    .slide.is-on { opacity: 1; }
+    .slide__bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(36px) brightness(0.45); }
+    .slide img { position: absolute; inset: 2vh 2vw; width: 96vw; height: 96vh; max-width: none; object-fit: contain; filter: drop-shadow(0 24px 50px rgba(0,0,0,0.55)); }
+    .caption {
+      position: fixed; left: 0; bottom: 0; right: 0; padding: 60px 4vw 3vh; pointer-events: none;
+      background: linear-gradient(transparent, rgba(8, 20, 15, 0.75));
+      transition: opacity 1.2s ease; font-family: var(--font-serif);
+    }
+    .caption__note { display: block; font-size: clamp(1.4rem, 2.6vw, 2.6rem); font-style: italic; line-height: 1.2; max-width: 70vw; }
+    .caption__meta { display: block; font-family: var(--font-sans); font-size: clamp(0.8rem, 1.2vw, 1.15rem); letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-on-dark-muted); margin-top: 6px; }
+    .qr {
+      position: fixed; right: 2.4vw; bottom: 3vh; z-index: 3; width: clamp(150px, 13vw, 230px);
+      background: #fff; color: var(--color-dark); border-radius: 10px; padding: 12px 12px 10px; text-align: center;
+      box-shadow: 0 18px 40px -16px rgba(0,0,0,0.7);
+    }
+    .qr svg { display: block; width: 100%; height: auto; }
+    .qr p { margin: 6px 0 0; font-size: clamp(0.7rem, 0.9vw, 0.95rem); line-height: 1.3; letter-spacing: 0.06em; }
+    .qr .script { font-size: clamp(1.3rem, 1.9vw, 2rem); line-height: 1; margin: 0 0 6px; color: var(--color-dark); letter-spacing: 0; }
+    .empty { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 5vw; }
+    .empty .script { font-size: clamp(3rem, 8vw, 7rem); color: var(--pink-200); margin: 0; line-height: 1.1; }
+    .empty p { font-family: var(--font-serif); font-size: clamp(1.2rem, 2.2vw, 2rem); margin: 0.6em 0 0; color: var(--color-on-dark-muted); }
+    .empty .qr { position: static; margin: 4vh auto 0; width: clamp(180px, 22vw, 320px); }
+    .hint {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 4;
+      background: rgba(0,0,0,0.55); padding: 8px 16px; border-radius: 999px; font-size: 0.85rem;
+      transition: opacity 0.6s; pointer-events: none;
+    }
+    body.idle .hint { opacity: 0; }
+    .error { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 6vw; font-family: var(--font-serif); font-size: 1.6rem; }
+  </style>
+</head>
+<body>
+  <div class="show" id="show" aria-live="off">
+    <div class="slide" id="slide-a"><div class="slide__bg"></div><img alt=""></div>
+    <div class="slide" id="slide-b"><div class="slide__bg"></div><img alt=""></div>
+  </div>
+  <div class="caption" id="caption"><span class="caption__note" id="caption-note"></span><span class="caption__meta" id="caption-meta"></span></div>
+
+  <div class="empty" id="empty" hidden>
+    <div>
+      <p class="script">Share the moments</p>
+      <p>Photos will appear here as soon as guests share them.</p>
+      <div class="qr" id="qr-big"></div>
+    </div>
+  </div>
+
+  <aside class="qr" id="qr" hidden>
+    <p class="script">Share yours</p>
+    <div id="qr-code"></div>
+    <p>Scan with your phone's camera</p>
+  </aside>
+
+  <p class="hint" id="hint">Click anywhere for full screen</p>
+  <p class="error" id="error" hidden></p>
+
+  <script src="../js/config.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/qrcode.js"></script>
+  <script src="../js/photo-tools.js"></script>
+  <script src="../js/slideshow.js"></script>
+</body>
+</html>

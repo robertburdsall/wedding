@@ -42,7 +42,7 @@ describe('sheet setup', () => {
   test('creates all tabs with the expected headers and removes the blank Sheet1', () => {
     const env = createGas();
     env.gs.setupSheets_(env.gs.ctx_());
-    assert.deepEqual(env.ss.getSheets().map((s) => s.getName()), ['Guests', 'Summary', 'Settings', 'RSVP Log']);
+    assert.deepEqual(env.ss.getSheets().map((s) => s.getName()), ['Guests', 'Summary', 'Settings', 'Photos', 'RSVP Log']);
     assert.deepEqual(env.ss.getSheetByName('Guests').rows()[0], [
       'Code', 'Guest Names', 'Email', 'Invite Type', 'Plus One', 'RSVP Status', 'Ceremony Attending',
       'Reception Attending', 'Ceremony Declined', 'Reception Declined', 'Plus One Name', 'Plus One Status', 'Responded At', 'Invite Sent At', 'Invite Opened At', 'Reminder Sent At', 'Invite Link', 'Text Message', 'Party Size',
@@ -67,7 +67,7 @@ describe('sheet setup', () => {
     env.gs.setupSheets_(env.c);
     assert.deepEqual(sheet.rows(), before);
     assert.equal(env.gs.readSettings_(env.c)['Ceremony Venue'], 'Changed Venue');
-    assert.equal(env.ss.getSheets().length, 4);
+    assert.equal(env.ss.getSheets().length, 5);
   });
 
   test('adds missing columns to an older sheet without moving existing ones', () => {
@@ -1633,6 +1633,270 @@ describe('reception dinner selection', () => {
     const all = env.sheet.objects().map((r) => String(r['Meal Choices'])).join('|');
     assert.equal(all.split(': Filet Mignon').length - 1, 1);
     assert.equal(all.split(': North Atlantic Salmon').length - 1, 1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+describe('photo sharing', () => {
+  // A tiny stand-in for a JPEG: the server only checks it starts like one.
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake photo bytes for testing')]).toString('base64');
+  const photoCode = (env) => env.gs.readSettings_(env.c)['Photo Code'];
+  const upload = (env, extra = {}) => apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, ...extra });
+  const list = (env, code = photoCode(env)) => apiGet(env, { action: 'photos', t: code });
+  const photoRows = (env) => env.ss.getSheetByName('Photos').objects();
+
+  test('setup makes a Photos tab, a secret photo code and the photo links', () => {
+    const env = setup();
+    assert.deepEqual(env.ss.getSheetByName('Photos').rows()[0],
+      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID']);
+    const s = env.gs.readSettings_(env.c);
+    assert.match(s['Photo Code'], /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
+    assert.equal(s['Photo Page Link'], `https://stephanieandrobert.test/photos/?t=${s['Photo Code']}`);
+    assert.equal(s['Photo Slideshow Link'], `https://stephanieandrobert.test/photos/slideshow.html?t=${s['Photo Code']}`);
+    assert.equal(s['Photo Table Cards Link'], `https://stephanieandrobert.test/photos/cards.html?t=${s['Photo Code']}`);
+    // Running it again keeps the same code.
+    env.gs.setupSheets_(env.c);
+    env.gs.generateCodes_(env.c);
+    assert.equal(photoCode(env), s['Photo Code']);
+  });
+
+  test('changing the Site URL or clearing the code updates the links', () => {
+    const env = setup();
+    const old = photoCode(env);
+    setSettings(env, { 'Site URL': 'https://new.test', 'Photo Code': '' });
+    env.gs.generateCodes_(env.c);
+    const s = env.gs.readSettings_(env.c);
+    assert.notEqual(s['Photo Code'], old);
+    assert.equal(s['Photo Page Link'], `https://new.test/photos/?t=${s['Photo Code']}`);
+    assert.equal(list(env, old).error, 'not_found');
+  });
+
+  test('the timeline needs the photo code; invitation codes and guesses do not work', () => {
+    const env = setup();
+    assert.equal(list(env, 'WRONGONE').error, 'not_found');
+    assert.equal(list(env, env.code(0)).error, 'not_found');
+    assert.equal(list(env, '').error, 'bad_request');
+    const res = list(env, photoCode(env).toLowerCase());
+    assert.equal(res.ok, true);
+    assert.deepEqual(res.data.photos, []);
+    assert.equal(res.data.uploads.open, true);
+    assert.equal(res.data.weddingDay, '2099-06-06');
+  });
+
+  test('wrong photo codes count toward the brute-force limit', () => {
+    const env = setup();
+    for (let i = 0; i < 60; i++) list(env, `WRONG${i}`);
+    assert.equal(list(env).error, 'rate_limited');
+    assert.equal(upload(env).error, 'rate_limited');
+  });
+
+  test('an upload is saved to a shared Drive folder and listed on the timeline', () => {
+    const env = setup();
+    const now = Date.now();
+    const res = upload(env, { from: 'Aunt Sue', caption: 'First dance!', table: '7', takenAt: new Date(now - 3600e3).toISOString(), width: 3000, height: 2000, uploadId: 'u-1' });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(res.data.duplicate, false);
+    const folderUrl = env.gs.readSettings_(env.c)['Photo Folder'];
+    assert.match(folderUrl, /^https:\/\/drive\.google\.com\/drive\/folders\//);
+    assert.equal(env.drive.folders.size, 1);
+    const [folder] = env.drive.folders.values();
+    assert.equal(folder.name, 'Stephanie & Robert — Wedding Photos');
+    const [file] = env.drive.files.values();
+    assert.equal(file.folder, folder.id);
+    assert.equal(file.contentType, 'image/jpeg');
+    assert.deepEqual(file.sharing, { access: 'ANYONE_WITH_LINK', permission: 'VIEW' });
+    assert.equal(file.bytes.toString('base64'), JPEG);
+    assert.match(file.name, /^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2} Aunt Sue\.jpg$/);
+    assert.equal(file.description, 'First dance!');
+
+    const [row] = photoRows(env);
+    assert.equal(row.From, 'Aunt Sue');
+    assert.equal(row.Caption, 'First dance!');
+    assert.equal(row.Table, 7); // Sheets turns "7" into a number
+    assert.equal(row.Hidden, false);
+    assert.equal(row['File ID'], file.id);
+    assert.equal(row.Photo, file.getUrl());
+    assert.equal(row['Taken At'].getTime(), now - 3600e3);
+    assert.ok(row['Uploaded At'] instanceof Date);
+    assert.equal(row.Width, 3000);
+    const formula = env.ss.getSheetByName('Photos').getRange(2, 7).getFormula();
+    assert.equal(formula, `=IMAGE("https://drive.google.com/thumbnail?id=${file.id}&sz=w200")`);
+
+    const { photos } = list(env).data;
+    assert.equal(photos.length, 1);
+    assert.deepEqual(photos[0], {
+      id: file.id, w: 3000, h: 2000, takenAt: new Date(now - 3600e3).toISOString(), uploadedAt: row['Uploaded At'].toISOString(),
+      from: 'Aunt Sue', caption: 'First dance!', table: '7',
+    });
+    assert.deepEqual(res.data.photo, photos[0]);
+  });
+
+  test('a second upload reuses the same folder; the timeline is in the order photos were taken', () => {
+    const env = setup();
+    const t = Date.now();
+    upload(env, { from: 'Late', takenAt: new Date(t - 1000).toISOString() });
+    upload(env, { from: 'Early', takenAt: new Date(t - 5000).toISOString() });
+    upload(env, { from: 'No time' });
+    assert.equal(env.drive.folders.size, 1);
+    assert.deepEqual(list(env).data.photos.map((p) => p.from), ['Early', 'Late', 'No time']);
+  });
+
+  test('a retried upload (same upload id) is only saved once', () => {
+    const env = setup();
+    const a = upload(env, { uploadId: 'abc-123' });
+    const b = upload(env, { uploadId: 'abc-123' });
+    assert.equal(b.data.duplicate, true);
+    assert.equal(b.data.photo.id, a.data.photo.id);
+    assert.equal(photoRows(env).length, 1);
+    assert.equal(env.drive.files.size, 1);
+  });
+
+  test('ticking Hidden takes a photo off the timeline', () => {
+    const env = setup();
+    upload(env, { from: 'Keep' });
+    upload(env, { from: 'Hide me' });
+    const sheet = env.ss.getSheetByName('Photos');
+    sheet.getRange(3, 6).setValue(true);
+    assert.deepEqual(list(env).data.photos.map((p) => p.from), ['Keep']);
+    sheet.getRange(3, 6).setValue(false);
+    assert.equal(list(env).data.photos.length, 2);
+  });
+
+  test('deleting a row takes the photo off; rows without a file are ignored', () => {
+    const env = setup();
+    upload(env, { from: 'One' });
+    env.ss.getSheetByName('Photos').appendRow(['', '', 'Typed by hand']);
+    assert.deepEqual(list(env).data.photos.map((p) => p.from), ['One']);
+  });
+
+  test('only JPEG photos are accepted, and not too large', () => {
+    const env = setup();
+    assert.equal(upload(env, { data: Buffer.from('<svg onload=alert(1)>').toString('base64') }).error, 'bad_photo');
+    assert.equal(upload(env, { data: '/9j/not base64!!' }).error, 'bad_photo');
+    assert.equal(upload(env, { data: '' }).error, 'bad_request');
+    assert.equal(upload(env, { data: 42 }).error, 'bad_request');
+    assert.equal(upload(env, { data: '/9j/' + 'A'.repeat(15 * 1024 * 1024) }).error, 'too_large');
+    assert.equal(upload(env, { data: `data:image/jpeg;base64,${JPEG}` }).ok, true);
+    assert.equal(env.drive.files.size, 1);
+  });
+
+  test('a big upload is fine, but other requests stay small', () => {
+    const env = setup();
+    const big = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(3 * 1024 * 1024, 7)]).toString('base64');
+    assert.equal(upload(env, { data: big }).ok, true);
+    const res = apiPost(env, { action: 'rsvp', code: env.code(0), attendance: { ceremony: [], reception: [] }, pad: 'x'.repeat(20000) });
+    assert.equal(res.error, 'bad_request');
+  });
+
+  test('names, captions and tables are cleaned and cannot become formulas', () => {
+    const env = setup();
+    const res = upload(env, { from: '=HYPERLINK("http://evil")', caption: '  multi\nline\tcaption  ', table: '<b>12</b>' });
+    assert.equal(res.ok, true);
+    const [row] = photoRows(env);
+    assert.equal(row.From, '=HYPERLINK("http://evil")'); // stored as text, not a formula
+    assert.equal(env.ss.getSheetByName('Photos').getRange(2, 3).getFormula(), '');
+    assert.equal(row.Caption, 'multi line caption');
+    assert.equal(row.Table, 'b12b');
+    assert.equal(upload(env, { from: 'x'.repeat(500) }).data.photo.from.length, 60);
+    assert.equal(upload(env, { caption: 'y'.repeat(900) }).data.photo.caption.length, 200);
+  });
+
+  test('impossible "taken at" times fall back to the upload time', () => {
+    const env = setup();
+    const future = upload(env, { takenAt: new Date(Date.now() + 86400e3).toISOString() }).data.photo;
+    assert.equal(future.takenAt, future.uploadedAt);
+    const junk = upload(env, { takenAt: 'yesterday-ish' }).data.photo;
+    assert.equal(junk.takenAt, junk.uploadedAt);
+    const ancient = upload(env, { takenAt: '1970-01-01T00:00:00Z' }).data.photo;
+    assert.equal(ancient.takenAt, ancient.uploadedAt);
+    const throwback = upload(env, { takenAt: '2015-07-04T12:00:00.000Z' }).data.photo;
+    assert.equal(throwback.takenAt, '2015-07-04T12:00:00.000Z');
+  });
+
+  test('uploads close after "Photo Uploads Until", but the timeline stays open', () => {
+    const env = setup();
+    upload(env, { from: 'Before' });
+    setSettings(env, { 'Photo Uploads Until': '2000-01-01' });
+    const res = upload(env);
+    assert.equal(res.error, 'closed');
+    assert.match(res.message, /January 1, 2000/);
+    const data = list(env).data;
+    assert.equal(data.photos.length, 1);
+    assert.deepEqual(data.uploads, { open: false, until: '2000-01-01', untilText: 'January 1, 2000' });
+  });
+
+  test('a pasted Photo Folder link is used; a broken one gives a clear message', () => {
+    const env = setup();
+    const mine = env.gs.DriveApp.createFolder('Our own folder');
+    setSettings(env, { 'Photo Folder': `https://drive.google.com/drive/u/0/folders/${mine.getId()}?usp=sharing` });
+    upload(env);
+    const [file] = env.drive.files.values();
+    assert.equal(file.folder, mine.getId());
+    setSettings(env, { 'Photo Folder': 'https://drive.google.com/drive/folders/DOESNOTEXIST123' });
+    assert.equal(upload(env).error, 'setup');
+  });
+
+  test('if Drive refuses to share the file, the photo is still saved', () => {
+    const env = setup();
+    env.drive.failSharing = true;
+    assert.equal(upload(env).ok, true);
+    assert.equal(photoRows(env).length, 1);
+    assert.match(env.logs.errors.join('\n'), /Could not share photo/);
+  });
+
+  test('photo moments come from Settings, in time order', () => {
+    const env = setup();
+    setSettings(env, { 'Photo Moments': '7:00 PM Dinner / 4 pm Ceremony / 5:00 p.m. – Cocktail hour / nonsense / 13:00 PM Bad\n8:30 PM Dancing' });
+    assert.deepEqual(list(env).data.moments, [
+      { time: '16:00', title: 'Ceremony' },
+      { time: '17:00', title: 'Cocktail hour' },
+      { time: '19:00', title: 'Dinner' },
+      { time: '20:30', title: 'Dancing' },
+    ]);
+  });
+
+  test('the wedding day comes from the Ceremony Date, typed or as a date', () => {
+    const env = setup();
+    setSettings(env, { 'Ceremony Date': "'Sat, Jun 6, 2099" });
+    assert.equal(list(env).data.weddingDay, '2099-06-06');
+    setSettings(env, { 'Ceremony Date': '' });
+    assert.equal(list(env).data.weddingDay, null);
+  });
+
+  test('photos work before "Set up sheets" adds the Photos tab', () => {
+    const env = setup();
+    env.ss.deleteSheet(env.ss.getSheetByName('Photos'));
+    assert.deepEqual(list(env).data.photos, []);
+    assert.equal(upload(env, { from: 'First' }).ok, true);
+    assert.equal(photoRows(env)[0].From, 'First');
+  });
+
+  test('the Summary counts shared and hidden photos', () => {
+    const env = setup();
+    const summary = env.ss.getSheetByName('Summary');
+    const labels = summary.rows().map((r) => r[0]);
+    const find = (label) => labels.indexOf(label) + 1;
+    assert.equal(summary.getRange(find('Photos shared'), 2).getFormula(), "=COUNTA('Photos'!I2:I)");
+    assert.equal(summary.getRange(find('Photos hidden'), 2).getFormula(), "=COUNTIF('Photos'!F2:F,TRUE)");
+  });
+
+  test('the menu shows the photo links and makes the Drive folder', () => {
+    const env = setup();
+    env.gs.menuPhotoLinks();
+    assert.equal(env.drive.folders.size, 1);
+    const msg = env.ui.alerts.at(-1);
+    assert.match(msg, /photos\/cards\.html\?t=/);
+    assert.match(msg, /photos\/slideshow\.html\?t=/);
+    assert.match(msg, /drive\.google\.com\/drive\/folders\//);
+    env.gs.onOpen();
+    assert.ok(env.ui.menus.at(-1).items.some(([, fn]) => fn === 'menuPhotoLinks'));
+  });
+
+  test('Set up sheets from the menu makes the folder once', () => {
+    const env = setup();
+    env.gs.menuSetup();
+    env.gs.menuSetup();
+    assert.equal(env.drive.folders.size, 1);
   });
 });
 

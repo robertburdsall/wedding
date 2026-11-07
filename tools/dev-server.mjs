@@ -5,7 +5,7 @@
 //
 // Usage: npm run dev   then open the printed links.
 import http from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -45,7 +45,7 @@ function readBody(req) {
   });
 }
 
-export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests = SAMPLE_GUESTS, settings = {}, quiet = false } = {}) {
+export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests = SAMPLE_GUESTS, settings = {}, quiet = false, samplePhotos = false } = {}) {
   const env = createGas();
   const pending = new Map(); // redirect id -> JSON text (like script.googleusercontent.com)
   const servers = [];
@@ -96,7 +96,15 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
       if (url.pathname === '/js/config.js') {
         const real = await readFile(path.join(siteDir, 'js', 'config.js'), 'utf8');
         res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Cache-Control': 'no-store' });
-        return res.end(real.replace(/apiUrl:\s*'[^']*'/, `apiUrl: '${apiUrl}'`));
+        return res.end(real.replace(/apiUrl:\s*'[^']*'/, `apiUrl: '${apiUrl}'`)
+          .replace(/photoUrl:\s*'[^']*'/, `photoUrl: '${siteUrl}/__drive/{id}?sz=w{size}'`));
+      }
+      // Stands in for Google Drive's image links: serves photos "uploaded" to the fake Drive.
+      if (url.pathname.startsWith('/__drive/')) {
+        const file = env.drive.files.get(decodeURIComponent(url.pathname.slice('/__drive/'.length)));
+        if (!file || file.trashed) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, { 'Content-Type': file.contentType, 'Cache-Control': 'no-store' });
+        return res.end(file.bytes);
       }
       if (url.pathname === '/__sheet') return sendHtml(res, renderSheets(env));
       if (url.pathname === '/__emails') return sendHtml(res, renderEmails(env));
@@ -148,17 +156,23 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
     'Full Invite: Joiner': 'to',
     'Full Invite: Second Name': 'Robert James',
     'Full Invite: Under Names': 'son of Mr. and Mrs. Example Parents',
+    'Photo Moments': '3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Dinner / 8:30 PM Dancing',
     'Send RSVP Confirmations': 'Yes',
     ...settings,
     ...(process.env.DEV_SETTINGS ? JSON.parse(await readFile(process.env.DEV_SETTINGS, 'utf8')) : {}),
   });
   env.gs.generateCodes_(c);
+  if (samplePhotos) await addSamplePhotos(env, c);
 
   const links = env.ss.getSheetByName('Guests').objects().map((r) => ({ names: r['Guest Names'], type: r['Invite Type'], plusOne: r['Plus One'], code: r.Code, link: r['Invite Link'] }));
   if (!quiet) {
     console.log(`\n  Website:      ${siteUrl}/`);
     console.log(`  Fake sheet:   ${siteUrl}/__sheet`);
-    console.log(`  Sent emails:  ${siteUrl}/__emails\n`);
+    console.log(`  Sent emails:  ${siteUrl}/__emails`);
+    const s = env.gs.readSettings_(c);
+    console.log(`  Photo album:  ${s['Photo Page Link']}&table=4`);
+    console.log(`  Slideshow:    ${s['Photo Slideshow Link']}`);
+    console.log(`  Table cards:  ${s['Photo Table Cards Link']}\n`);
     console.log('  Sample invitations:');
     for (const l of links) console.log(`    ${l.link}   ${l.names} (${l.type}${l.plusOne === 'Yes' ? ', +1' : ''})`);
     console.log('');
@@ -168,6 +182,24 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
     env, siteUrl, apiUrl, links,
     close: () => Promise.all(servers.map((s) => new Promise((r) => { s.closeAllConnections?.(); s.close(r); }))),
   };
+}
+
+// Fills the photo album with the photos from the main page, spread over the (made-up) wedding day.
+async function addSamplePhotos(env, c) {
+  const dir = path.join(siteDir, 'images', 'photos');
+  const files = (await readdir(dir)).filter((f) => /^\d+\.jpg$/.test(f)).sort();
+  const times = ['15:12', '15:40', '16:05', '16:20', '17:10', '17:35', '19:05', '19:30', '20:45', '21:10', '21:30', '22:00'];
+  const people = ['Aunt Sue', 'Jamie', '', 'Pat & Sam', 'Uncle Lou', 'Morgan'];
+  const later = new Date(2099, 5, 7, 12, 0);
+  const code = env.gs.readSettings_(c)['Photo Code'];
+  for (let i = 0; i < files.length * 2; i++) {
+    const [hh, mm] = times[i % times.length].split(':').map(Number);
+    const data = (await readFile(path.join(dir, files[i % files.length]))).toString('base64');
+    env.gs.submitPhoto_(c, {
+      code, data, from: people[i % people.length], caption: i % 4 === 0 ? 'So happy for you two!' : '',
+      table: String((i % 6) + 1), takenAt: new Date(2099, 5, 6, hh, mm + i).toISOString(), width: 1286, height: 1800,
+    }, later);
+  }
 }
 
 function sendHtml(res, body) {
@@ -192,5 +224,5 @@ function renderEmails(env) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  startDevServers({ sitePort: Number(process.env.PORT) || 5173 });
+  startDevServers({ sitePort: Number(process.env.PORT) || 5173, samplePhotos: true });
 }

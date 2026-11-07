@@ -23,9 +23,9 @@ window.WeddingAPI = (function () {
     return url;
   }
 
-  async function request(url, options) {
+  async function request(url, options, timeoutMs = TIMEOUT_MS) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
     try {
       res = await fetch(url, { ...options, signal: controller.signal, redirect: 'follow', credentials: 'omit' });
@@ -85,5 +85,23 @@ window.WeddingAPI = (function () {
     });
   }
 
-  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, ApiError };
+  // The shared photo timeline (needs the photo code from the table cards).
+  async function getPhotos(code) {
+    const url = new URL(apiUrl());
+    url.searchParams.set('action', 'photos');
+    url.searchParams.set('t', code);
+    return request(url.toString(), { method: 'GET' });
+  }
+
+  // Uploads one photo ({ code, data: base64 JPEG, from, caption, table, takenAt, width, height, uploadId }).
+  // Photos are big and venue signal can be slow, so this waits longer than other requests.
+  async function uploadPhoto(payload) {
+    return request(apiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'photo', ...payload }),
+    }, 180000);
+  }
+
+  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, getPhotos, uploadPhoto, ApiError };
 })();

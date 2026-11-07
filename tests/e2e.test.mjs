@@ -118,6 +118,22 @@ describe('website ↔ Apps Script over HTTP', () => {
     await assert.rejects(api.getMeals(code(2)), (err) => err.code === 'not_reception');
   });
 
+  test('a photo uploads over HTTP (no preflight) and shows on the timeline', async () => {
+    const t = dev.env.gs.readSettings_(dev.env.gs.ctx_())['Photo Code'];
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200000, 9)]).toString('base64');
+    log.length = 0;
+    const res = await api.uploadPhoto({ code: t, data: jpeg, from: 'Test Guest', table: '3', takenAt: new Date().toISOString(), width: 10, height: 10, uploadId: 'e2e-1' });
+    assert.ok(!log.includes('preflight'));
+    assert.equal(res.photo.from, 'Test Guest');
+    const list = await api.getPhotos(t);
+    assert.ok(list.photos.some((p) => p.id === res.photo.id));
+    await assert.rejects(api.getPhotos('WRONGCODE'), (err) => err.code === 'not_found');
+    // The dev server serves the "Drive" file so the pages can be previewed locally.
+    const img = await fetch(`${dev.siteUrl}/__drive/${res.photo.id}?sz=w600`);
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get('content-type'), 'image/jpeg');
+  });
+
   test('server errors come back as ApiError with the server message', async () => {
     await assert.rejects(api.getInvite('NOPE99'), (err) => err.code === 'not_found' && /couldn't find/.test(err.message));
     await assert.rejects(
@@ -162,13 +178,14 @@ describe('static site', () => {
   after(() => dev.close());
 
   test('pages are served, and the dev config points at the fake API', async () => {
-    for (const p of ['/', '/invite/', `/invite/?code=${dev.links[0].code}`]) {
+    for (const p of ['/', '/invite/', `/invite/?code=${dev.links[0].code}`, '/meal/', '/photos/', '/photos/slideshow.html', '/photos/cards.html']) {
       const res = await fetch(dev.siteUrl + p);
       assert.equal(res.status, 200, p);
       assert.match(res.headers.get('content-type'), /text\/html/);
     }
     const cfg = await (await fetch(`${dev.siteUrl}/js/config.js`)).text();
     assert.ok(cfg.includes(dev.apiUrl));
+    assert.ok(cfg.includes(`${dev.siteUrl}/__drive/{id}`));
   });
 
   test('/invite redirects to /invite/ like GitHub Pages', async () => {
@@ -183,7 +200,7 @@ describe('static site', () => {
   });
 
   test('every local file referenced by the HTML exists', () => {
-    for (const page of ['index.html', 'invite/index.html', 'meal/index.html']) {
+    for (const page of ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html']) {
       const html = readFileSync(site(page), 'utf8');
       const refs = [...html.matchAll(/(?:href|src|srcset)="([^"#]+)"/g)].map((m) => m[1]).filter((u) => !/^(https?:|mailto:|data:)/.test(u));
       assert.ok(refs.length > 3, page);
@@ -196,7 +213,9 @@ describe('static site', () => {
   });
 
   test('the public website files contain no date, time or year', () => {
-    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js'];
+    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html',
+      'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js',
+      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i, f);
@@ -222,11 +241,89 @@ describe('static site', () => {
   });
 
   test('the public site never contains guest or reception details', () => {
-    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js'];
+    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html',
+      'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js',
+      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /Reception Venue|Reception Address|@gmail\.com/i, f);
     }
     assert.doesNotMatch(readFileSync(site('index.html'), 'utf8'), /reception/i);
+  });
+
+  test('the main page does not link to the photo album (the code stays on the table cards)', () => {
+    assert.doesNotMatch(readFileSync(site('index.html'), 'utf8'), /["'](\.\/)?photos\//);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+describe('photo page helpers (js/photo-tools.js)', () => {
+  function loadTools(config = {}) {
+    const window = { WEDDING_CONFIG: config };
+    const ctx = vm.createContext({ window });
+    vm.runInContext(readFileSync(site('js/photo-tools.js'), 'utf8'), ctx, { filename: 'photo-tools.js' });
+    return window.PhotoTools;
+  }
+
+  // Builds the start of a JPEG with an EXIF "date taken" (and optionally its time zone).
+  function jpegWithExif(stamp, { zone = null, little = true } = {}) {
+    const tiff = [];
+    const u16 = (v) => (little ? [v & 255, v >> 8] : [v >> 8, v & 255]);
+    const u32 = (v) => (little ? [v & 255, (v >> 8) & 255, (v >> 16) & 255, v >>> 24] : [v >>> 24, (v >> 16) & 255, (v >> 8) & 255, v & 255]);
+    const ascii = (s) => [...Buffer.from(s + '\0', 'latin1')];
+    const exifIfd = 26;
+    const entries = zone ? 2 : 1;
+    const dataAt = exifIfd + 2 + entries * 12 + 4;
+    tiff.push(...(little ? [0x49, 0x49] : [0x4d, 0x4d]), ...u16(42), ...u32(8));
+    tiff.push(...u16(1), ...u16(0x8769), ...u16(4), ...u32(1), ...u32(exifIfd), ...u32(0));
+    tiff.push(...u16(entries), ...u16(0x9003), ...u16(2), ...u32(stamp.length + 1), ...u32(dataAt));
+    if (zone) tiff.push(...u16(0x9011), ...u16(2), ...u32(zone.length + 1), ...u32(dataAt + stamp.length + 1));
+    tiff.push(...u32(0), ...ascii(stamp), ...(zone ? ascii(zone) : []));
+    const app1 = [...Buffer.from('Exif\0\0', 'latin1'), ...tiff];
+    const bytes = [0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xe1, (app1.length + 2) >> 8, (app1.length + 2) & 255, ...app1, 0xff, 0xda];
+    return new Uint8Array(bytes).buffer;
+  }
+
+  test('reads when a photo was taken from its EXIF data', () => {
+    const T = loadTools();
+    assert.equal(T.readExifDate(jpegWithExif('2099:06:06 19:42:10')).getTime(), new Date(2099, 5, 6, 19, 42, 10).getTime());
+    assert.equal(T.readExifDate(jpegWithExif('2099:06:06 19:42:10', { little: false })).getTime(), new Date(2099, 5, 6, 19, 42, 10).getTime());
+    assert.equal(T.readExifDate(jpegWithExif('2099:06:06 19:42:10', { zone: '-05:00' })).toISOString(), '2099-06-07T00:42:10.000Z');
+  });
+
+  test('photos without a usable date give null instead of failing', () => {
+    const T = loadTools();
+    assert.equal(T.readExifDate(new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer), null); // a PNG
+    assert.equal(T.readExifDate(new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2]).buffer), null); // JPEG, no EXIF
+    assert.equal(T.readExifDate(jpegWithExif('0000:00:00 00:00:00')), null);
+    assert.equal(T.readExifDate(jpegWithExif('garbage')), null);
+    assert.equal(T.readExifDate(jpegWithExif('2099:06:06 19:42:10').slice(0, 30)), null); // cut off
+    assert.equal(T.readExifDate(new ArrayBuffer(0)), null);
+  });
+
+  test('image links come from Google Drive by default, and never from odd ids', () => {
+    assert.equal(loadTools().photoUrl('1AbC_def-123456', 600), 'https://drive.google.com/thumbnail?id=1AbC_def-123456&sz=w600');
+    assert.equal(loadTools({ photoUrl: 'http://x/__drive/{id}?sz=w{size}' }).photoUrl('1AbC_def-123456', 2000), 'http://x/__drive/1AbC_def-123456?sz=w2000');
+    assert.equal(loadTools().photoUrl('"><script>', 600), '');
+    assert.equal(loadTools().photoUrl('short', 600), '');
+  });
+
+  test('the timeline is split into the moments of the day, then by day', () => {
+    const tools = loadTools();
+    // Copy results out of the sandbox so deepEqual compares plain values.
+    const T = { groupPhotos: (...a) => JSON.parse(JSON.stringify(tools.groupPhotos(...a))) };
+    const at = (d, h, m) => ({ id: `p${d}${h}${m}`, takenAt: new Date(2099, 5, d, h, m).toISOString() });
+    const photos = [at(5, 18, 0), at(6, 14, 0), at(6, 16, 0), at(6, 16, 45), at(6, 19, 30), at(7, 10, 0)];
+    const sections = T.groupPhotos(photos, { moments: [{ time: '16:00', title: 'Ceremony' }, { time: '19:00', title: 'Dinner' }], weddingDay: '2099-06-06' });
+    assert.deepEqual(sections.map((s) => [s.title, s.photos.length]), [
+      [sections[0].title, 1], ['Earlier that day', 1], ['Ceremony', 2], ['Dinner', 1], [sections[4].title, 1],
+    ]);
+    assert.match(sections[0].title, /5/);
+    assert.match(sections[2].time, /4:00/);
+    // Without moments, the wedding day is one section.
+    const plain = T.groupPhotos(photos, { weddingDay: '2099-06-06' });
+    assert.deepEqual(plain.map((s) => s.photos.length), [1, 4, 1]);
+    assert.equal(plain[1].title, 'The wedding day');
+    assert.deepEqual(T.groupPhotos([], {}), []);
   });
 });

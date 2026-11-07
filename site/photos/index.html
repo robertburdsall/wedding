@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Share Your Photos · Stephanie &amp; Robert</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#15322a">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500&family=Pinyon+Script&display=swap">
+  <link rel="stylesheet" href="../css/theme.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/invite.css">
+  <link rel="stylesheet" href="../css/photos.css">
+</head>
+<body class="photos-page">
+  <header class="invite-header">
+    <a href="../" class="invite-header__brand monogram">S &amp; R</a>
+  </header>
+
+  <main id="app" data-state="loading" aria-live="polite">
+    <section class="state state--loading">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Opening the photo album…</p>
+    </section>
+
+    <section class="state state--error">
+      <div class="panel">
+        <p class="eyebrow">Hmm…</p>
+        <h1 class="panel__title" id="error-title">We couldn't open the photos</h1>
+        <p id="error-message"></p>
+        <form class="code-form" id="code-form" novalidate>
+          <label for="code-input" class="visually-hidden">Photo code</label>
+          <input class="input code-form__input" id="code-input" placeholder="Code on your table card" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12">
+          <button class="btn" type="submit">Open</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="state state--photos">
+      <!-- Add photos -->
+      <div class="photos-hero">
+        <img class="photos-hero__floral photos-hero__floral--top" src="../images/floral-top-right.png" alt="">
+        <img class="photos-hero__floral photos-hero__floral--bottom" src="../images/floral-bottom-left.png" alt="">
+        <div class="photos-hero__inner">
+          <p class="eyebrow" id="photos-eyebrow">Stephanie &amp; Robert</p>
+          <h1 class="photos-hero__title script">Share the moments</h1>
+          <p class="photos-hero__text" id="photos-intro">Add your photos and see the day through everyone's eyes.</p>
+          <div id="add-area">
+            <label class="btn photos-add" for="photo-input">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.4-2h5.8l1.4 2h2.2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5zM12 16.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></svg>
+              Add photos
+            </label>
+            <input type="file" id="photo-input" class="visually-hidden" accept="image/*" multiple>
+            <p class="photos-hint">No app needed. Pick as many as you like.</p>
+          </div>
+          <p class="photos-closed" id="photos-closed" hidden></p>
+        </div>
+      </div>
+
+      <!-- Uploads in progress -->
+      <div class="upload-queue" id="upload-queue" hidden>
+        <p class="upload-queue__status" id="upload-status"></p>
+        <ul class="upload-queue__list" id="upload-list"></ul>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline" id="timeline">
+        <div class="timeline__bar">
+          <p class="timeline__count" id="timeline-count"></p>
+          <div class="timeline__sort" role="group" aria-label="Order">
+            <button type="button" class="chip" data-sort="oldest" aria-pressed="true">Oldest first</button>
+            <button type="button" class="chip" data-sort="newest" aria-pressed="false">Newest first</button>
+          </div>
+        </div>
+        <button type="button" class="new-photos" id="new-photos" hidden></button>
+        <div id="timeline-sections"></div>
+        <p class="timeline__empty" id="timeline-empty" hidden>No photos yet. Be the first to share one!</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Before sharing: name and note -->
+  <div class="share-sheet" id="share-sheet" hidden>
+    <form class="share-sheet__panel" id="share-form" novalidate>
+      <h2 class="share-sheet__title" id="share-title">Share photos</h2>
+      <div class="share-sheet__previews" id="share-previews"></div>
+      <label class="field-label" for="share-from">Your name <span class="optional">(optional)</span></label>
+      <input class="input" id="share-from" maxlength="60" autocomplete="name" placeholder="So everyone knows who took them">
+      <label class="field-label" for="share-caption">Add a note <span class="optional">(optional)</span></label>
+      <input class="input" id="share-caption" maxlength="200" placeholder="For example: First dance!">
+      <div class="share-sheet__actions">
+        <button type="submit" class="btn" id="share-submit">Share</button>
+        <button type="button" class="btn btn--ghost" id="share-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Full-screen photo -->
+  <div class="lightbox photo-lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo">
+    <button class="lightbox__close" type="button" data-action="close" aria-label="Close">&times;</button>
+    <button class="lightbox__nav lightbox__nav--prev" type="button" data-action="prev" aria-label="Previous photo">&lsaquo;</button>
+    <figure class="photo-lightbox__figure">
+      <img class="lightbox__img" id="lightbox-img" alt="">
+      <figcaption class="photo-lightbox__caption" id="lightbox-caption"></figcaption>
+    </figure>
+    <button class="lightbox__nav lightbox__nav--next" type="button" data-action="next" aria-label="Next photo">&rsaquo;</button>
+  </div>
+
+  <footer class="invite-footer">
+    <p class="script">Stephanie &amp; Robert</p>
+    <p><a href="../">Visit our wedding website</a></p>
+  </footer>
+
+  <script src="../js/config.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/photo-tools.js"></script>
+  <script src="../js/photos.js"></script>
+</body>
+</html>

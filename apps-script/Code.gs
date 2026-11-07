@@ -5,14 +5,15 @@
  *   - adds a "Wedding" menu to the sheet (set up, generate codes, check the list, send invites/reminders)
  *   - serves a small JSON web API the website calls to show an invitation and save an RSVP
  *   - writes every RSVP back into the guest's row on the "Guests" sheet
+ *   - saves photos guests share from the reception tables to a Google Drive folder
  *
  * See SETUP.md in the website repo for installation steps.
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '1.9.0';
+var VERSION = '2.0.0';
 
-var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log' };
+var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
 // Guest sheet columns are found by header text, so they can be reordered and extra columns added.
 var COL = {
@@ -73,6 +74,32 @@ var GUEST_HEADER_NOTES = {
   'Invite Opened At': 'Filled in automatically the first time this household taps open the envelope on their invitation (or RSVPs). Blank = not opened yet. Link previews in texts and emails do not count. Opening it yourself to test does, so clear the cell afterwards.'
 };
 
+// The "Photos" tab: one row per shared photo.
+var PHOTO_COL = {
+  uploadedAt: 'Uploaded At',
+  takenAt: 'Taken At',
+  from: 'From',
+  caption: 'Caption',
+  table: 'Table',
+  hidden: 'Hidden',
+  preview: 'Preview',
+  link: 'Photo',
+  fileId: 'File ID',
+  width: 'Width',
+  height: 'Height',
+  uploadId: 'Upload ID'
+};
+var PHOTO_HEADERS = Object.keys(PHOTO_COL).map(function (k) { return PHOTO_COL[k]; });
+var PHOTO_HEADER_NOTES = {
+  'Hidden': 'Tick to take this photo off the timeline and slideshow. The file stays in your Drive folder.',
+  'Taken At': 'When the photo was taken, according to the guest\'s phone. The timeline is in this order.',
+  'Table': 'Which table card the guest scanned.',
+  'Photo': 'The photo in your Google Drive folder.'
+};
+// Phones shrink photos before uploading (see site/js/photos.js), so these are generous.
+var PHOTO_MAX_BASE64 = 14 * 1024 * 1024; // about 10 MB of JPEG
+var MAX_BODY_LENGTH = PHOTO_MAX_BASE64 + 20000;
+
 var TYPE_FULL = 'Wedding + Reception';
 var TYPE_CEREMONY = 'Ceremony Only';
 var STATUS = { none: 'Not responded', attending: 'Attending', declined: 'Declined' };
@@ -127,7 +154,14 @@ var SETTINGS_DEFAULTS = [
   ['Text Message', TEXT_TEMPLATE_DEFAULT, 'Wording for the "Text Message" column on the Guests tab. You can use: {first names} {names} {date} {events} {plus one} {deadline} {link} {code}'],
   ['Meal Options', 'North Atlantic Salmon / Filet Mignon', 'The dinner choices for reception guests, separated by " / ". After changing them, run Wedding → Set up sheets so the Summary counts them.'],
   ['Meal Deadline', '', 'Last day reception guests can choose or change their meals. Blank = no deadline.'],
-  ['Meal Text Message', MEAL_TEXT_DEFAULT, 'Wording for the "Meal Text Message" column. You can use: {first names} {names} {meal link} {meal deadline} {code}']
+  ['Meal Text Message', MEAL_TEXT_DEFAULT, 'Wording for the "Meal Text Message" column. You can use: {first names} {names} {meal link} {meal deadline} {code}'],
+  ['Photo Code', '', 'The secret code on the table QR cards that lets guests share and see photos. Filled in automatically. Clear it to get a new one (old cards then stop working).'],
+  ['Photo Uploads Until', '', 'Last day guests can add photos. Blank = no end. The timeline stays viewable either way.'],
+  ['Photo Moments', '', 'Optional: names parts of the wedding day on the photo timeline by start time, for example: 3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Dinner / 8:30 PM Dancing. Uses the Ceremony Date as the day.'],
+  ['Photo Folder', '', 'Filled in automatically: the Google Drive folder photos are saved to. You can paste the link to a different folder of yours instead.'],
+  ['Photo Page Link', '', 'Filled in automatically: the link in the table QR codes.'],
+  ['Photo Slideshow Link', '', 'Filled in automatically: open this on a TV or projector for a live slideshow of the photos.'],
+  ['Photo Table Cards Link', '', 'Filled in automatically: open this on a computer to print the table QR cards.']
 ];
 
 /* =====================================================================
@@ -188,19 +222,27 @@ function respond_(fn) {
 function parseBody_(e) {
   var raw = e && e.postData && e.postData.contents;
   if (!raw) fail_('bad_request', 'Missing request body.');
-  if (raw.length > 10000) fail_('bad_request', 'Request is too large.');
+  if (raw.length > MAX_BODY_LENGTH) fail_('too_large', 'That photo is too large to share. Please try a different one.');
+  var body;
   try {
-    var body = JSON.parse(raw);
+    body = JSON.parse(raw);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('not an object');
-    return body;
   } catch (err) {
     fail_('bad_request', 'Request was not valid JSON.');
   }
+  // Only photo uploads may be big.
+  if (raw.length > 10000 && body.action !== 'photo') fail_('bad_request', 'Request is too large.');
+  return body;
 }
 
 function handleGet_(c, params, now) {
   var action = String(params.action || 'invite');
   if (action === 'ping') return { version: VERSION };
+  if (action === 'photos') {
+    var photoSettings = readSettings_(c);
+    checkPhotoCode_(photoSettings, params.t || params.code, now);
+    return photosPayload_(c, photoSettings, now);
+  }
   if (action !== 'invite' && action !== 'opened' && action !== 'meal') fail_('bad_request', 'Unknown action.');
 
   var settings = readSettings_(c);
@@ -219,6 +261,7 @@ function handleGet_(c, params, now) {
 function handlePost_(c, body, now) {
   if (body.action === 'rsvp') return submitRsvp_(c, body, now);
   if (body.action === 'meal') return submitMeals_(c, body, now);
+  if (body.action === 'photo') return submitPhoto_(c, body, now);
   fail_('bad_request', 'Unknown action.');
 }
 
@@ -297,20 +340,24 @@ function findGuest_(table, code) {
 
 // findGuest_ plus brute-force protection (see LOOKUP_LIMIT).
 function lookupGuest_(table, code, now) {
+  var guard = codeGuard_(now);
+  try {
+    return findGuest_(table, code);
+  } catch (err) {
+    if (err instanceof AppError_ && err.code === 'not_found') guard.miss();
+    throw err;
+  }
+}
+
+// Stops lookups for the rest of the window once there have been too many wrong codes.
+function codeGuard_(now) {
   var cache = CacheService.getScriptCache();
   var key = 'badcodes:' + Math.floor(now.getTime() / LOOKUP_WINDOW_MS);
   var misses = Number(cache.get(key) || 0);
   if (misses >= LOOKUP_LIMIT) {
     fail_('rate_limited', 'Too many attempts right now. Please wait a few minutes and try again.');
   }
-  try {
-    return findGuest_(table, code);
-  } catch (err) {
-    if (err instanceof AppError_ && err.code === 'not_found') {
-      cache.put(key, String(misses + 1), 2 * LOOKUP_WINDOW_MS / 1000);
-    }
-    throw err;
-  }
+  return { miss: function () { cache.put(key, String(misses + 1), 2 * LOOKUP_WINDOW_MS / 1000); } };
 }
 
 // Records the first time a household opens its invitation. Never blocks the invitation itself.
@@ -463,6 +510,12 @@ function dateKey_(v) {
   if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // US style MM/DD/YYYY
   if (m) return m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  m = s.match(/^(?:[A-Za-z]+,\s*)?([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/); // "Saturday, June 6, 2099"
+  if (m) {
+    var month = -1;
+    MONTHS_.forEach(function (name, i) { if (name.toLowerCase().indexOf(m[1].toLowerCase()) === 0 && m[1].length >= 3) month = i; });
+    if (month >= 0) return m[3] + '-' + ('0' + (month + 1)).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  }
   return null;
 }
 
@@ -812,6 +865,255 @@ function logMeals_(c, now, g, body) {
     safeText_(g.dietary), safeText_(JSON.stringify(body).slice(0, 2000))]);
 }
 
+/* =====================================================================
+ * Photo sharing: guests scan the QR card on their table, add photos, and see
+ * everyone's photos on a timeline. Photos are saved to a Google Drive folder
+ * and listed on the "Photos" tab, where ticking "Hidden" takes one off the timeline.
+ * ===================================================================== */
+
+function photoCode_(settings) {
+  return normalizeCode_(setting_(settings, 'Photo Code'));
+}
+
+// Wrong photo codes count toward the same brute-force limit as wrong invitation codes.
+function checkPhotoCode_(settings, code, now) {
+  var guard = codeGuard_(now);
+  var given = normalizeCode_(code);
+  if (!given) fail_('bad_request', 'Please enter the photo code from your table card.');
+  var real = photoCode_(settings);
+  if (!real) fail_('not_ready', "Photo sharing isn't open yet. Please check back soon!");
+  if (given !== real) {
+    guard.miss();
+    fail_('not_found', "That photo code didn't work. Please scan the QR code on your table card again.");
+  }
+}
+
+function photoLinks_(settings, code) {
+  var base = String(setting_(settings, 'Site URL')).replace(/\/+$/, '');
+  return {
+    'Photo Page Link': base + '/photos/?t=' + code,
+    'Photo Slideshow Link': base + '/photos/slideshow.html?t=' + code,
+    'Photo Table Cards Link': base + '/photos/cards.html?t=' + code
+  };
+}
+
+// Gives the photo page a secret code (once) and keeps its links on the Settings tab current.
+function ensurePhotoSettings_(c, settings) {
+  var code = photoCode_(settings);
+  if (!code) {
+    code = randomCode_();
+    if (!writeSetting_(c, 'Photo Code', code)) return;
+    settings['Photo Code'] = code;
+  }
+  var links = photoLinks_(settings, code);
+  Object.keys(links).forEach(function (key) {
+    if (setting_(settings, key) !== links[key] && writeSetting_(c, key, links[key])) settings[key] = links[key];
+  });
+}
+
+function writeSetting_(c, key, value) {
+  var sh = sheet_(c, 'settings');
+  if (!sh || !sh.getLastRow()) return false;
+  var keys = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]).trim() === key) {
+      sh.getRange(i + 1, 2).setNumberFormat('@').setValue(value);
+      return true;
+    }
+  }
+  return false;
+}
+
+// "4:00 PM Ceremony / 5:00 PM Cocktail hour" → [{ time: '16:00', title: 'Ceremony' }, ...]
+function photoMoments_(settings) {
+  return lines_(setting_(settings, 'Photo Moments')).map(function (line) {
+    var m = line.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?\s*[-–—:]?\s*(.+)$/i);
+    if (!m || Number(m[1]) < 1 || Number(m[1]) > 12 || Number(m[2] || 0) > 59) return null;
+    var hour = Number(m[1]) % 12 + (m[3].toLowerCase() === 'p' ? 12 : 0);
+    return { time: ('0' + hour).slice(-2) + ':' + (m[2] || '00'), title: m[4].trim().slice(0, 60) };
+  }).filter(function (x) { return x; }).sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
+}
+
+function photoSheet_(c) {
+  var sh = sheet_(c, 'photos');
+  if (!sh) {
+    sh = c.ss.insertSheet(c.names.photos);
+    sh.appendRow(PHOTO_HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function photoCols_(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  var cols = {};
+  Object.keys(PHOTO_COL).forEach(function (key) { cols[key] = header.indexOf(PHOTO_COL[key]); });
+  return { cols: cols, width: lastCol };
+}
+
+function isTicked_(v) {
+  return v === true || /^(true|yes|y|x|hide|hidden)$/i.test(String(v === null || v === undefined ? '' : v).trim());
+}
+
+function readPhotos_(c) {
+  var sh = sheet_(c, 'photos');
+  if (!sh || sh.getLastRow() < 2) return [];
+  var info = photoCols_(sh);
+  var cols = info.cols;
+  function get(row, key) { return cols[key] >= 0 ? row[cols[key]] : ''; }
+  return sh.getRange(2, 1, sh.getLastRow() - 1, info.width).getValues().map(function (row) {
+    return {
+      id: String(get(row, 'fileId')).trim(),
+      uploadId: String(get(row, 'uploadId')).trim(),
+      uploadedAt: get(row, 'uploadedAt'),
+      takenAt: get(row, 'takenAt'),
+      from: String(get(row, 'from')).trim(),
+      caption: String(get(row, 'caption')).trim(),
+      table: String(get(row, 'table')).trim(),
+      hidden: isTicked_(get(row, 'hidden')),
+      width: Number(get(row, 'width')) || 0,
+      height: Number(get(row, 'height')) || 0
+    };
+  });
+}
+
+function isoTime_(v) {
+  return v instanceof Date && !isNaN(v.getTime()) ? v.toISOString() : '';
+}
+
+function publicPhoto_(p) {
+  var taken = isoTime_(p.takenAt) || isoTime_(p.uploadedAt);
+  return { id: p.id, w: p.width, h: p.height, takenAt: taken, uploadedAt: isoTime_(p.uploadedAt) || taken, from: p.from, caption: p.caption, table: p.table };
+}
+
+var DRIVE_ID_ = /^[A-Za-z0-9_-]{10,200}$/;
+
+function photosPayload_(c, settings, now) {
+  var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
+  var photos = readPhotos_(c)
+    .filter(function (p) { return !p.hidden && DRIVE_ID_.test(p.id); })
+    .map(publicPhoto_)
+    .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : (a.uploadedAt < b.uploadedAt ? -1 : 1); });
+  return {
+    photos: photos,
+    moments: photoMoments_(settings),
+    weddingDay: dateKey_(settings['Ceremony Date']),
+    uploads: { open: uploads.open, until: uploads.deadline, untilText: uploads.deadlineText }
+  };
+}
+
+function cleanText_(v, max) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function cleanTable_(v) {
+  return cleanText_(v, 40).replace(/[^A-Za-z0-9 #&'.\-]/g, '').trim().slice(0, 24);
+}
+
+// The time the photo was taken, as reported by the phone. Falls back to now if it's missing or impossible.
+function photoTime_(v, now) {
+  if (typeof v !== 'string' || !v) return now;
+  var d = new Date(v);
+  if (isNaN(d.getTime()) || d.getTime() > now.getTime() + 10 * 60 * 1000 || d.getFullYear() < 1990) return now;
+  return d;
+}
+
+function photoDimension_(v) {
+  var n = Math.round(Number(v));
+  return n >= 1 && n <= 20000 ? n : '';
+}
+
+// The Drive folder photos go into: the one on the Settings tab, or a new one (saved to Settings).
+function photoFolderId_(c, settings) {
+  var raw = setting_(settings, 'Photo Folder');
+  var m = raw.match(/folders\/([A-Za-z0-9_-]+)/) || raw.match(/[?&]id=([A-Za-z0-9_-]+)/) || raw.match(/^([A-Za-z0-9_-]{10,})$/);
+  if (m) {
+    try {
+      return DriveApp.getFolderById(m[1]).getId();
+    } catch (err) {
+      fail_('setup', 'The Photo Folder on the Settings tab could not be opened. Clear it to have a new folder made.');
+    }
+  }
+  var name = (setting_(settings, 'Sender Name') || 'Wedding') + ' — Wedding Photos';
+  var folder = DriveApp.createFolder(name);
+  writeSetting_(c, 'Photo Folder', folder.getUrl());
+  settings['Photo Folder'] = folder.getUrl();
+  return folder.getId();
+}
+
+function withLock_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(25000);
+  try { return fn(); } finally { lock.releaseLock(); }
+}
+
+function submitPhoto_(c, body, now) {
+  var settings = readSettings_(c);
+  checkPhotoCode_(settings, body.code, now);
+  var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
+  if (!uploads.open) fail_('closed', 'Photo sharing closed on ' + uploads.deadlineText + '. Thank you for all the photos!');
+
+  var data = typeof body.data === 'string' ? body.data.replace(/^data:image\/jpeg;base64,/, '') : '';
+  if (!data) fail_('bad_request', 'Missing photo.');
+  if (data.length > PHOTO_MAX_BASE64) fail_('too_large', 'That photo is too large to share. Please try a different one.');
+  if (data.slice(0, 4) !== '/9j/' || !/^[A-Za-z0-9+\/]+={0,2}$/.test(data)) fail_('bad_photo', 'Only photos can be shared here.');
+  var uploadId = String(body.uploadId || '').replace(/[^A-Za-z0-9\-]/g, '').slice(0, 64);
+  function already() {
+    if (!uploadId) return null;
+    return readPhotos_(c).filter(function (p) { return p.uploadId === uploadId; })[0] || null;
+  }
+  // A retried upload (the reply got lost) returns the photo that was already saved.
+  var dup = already();
+  if (dup) return { photo: publicPhoto_(dup), duplicate: true };
+
+  var takenAt = photoTime_(body.takenAt, now);
+  var from = cleanText_(body.from, 60);
+  var caption = cleanText_(body.caption, 200);
+  var table = cleanTable_(body.table);
+  var width = photoDimension_(body.width);
+  var height = photoDimension_(body.height);
+
+  var folderId = withLock_(function () { return photoFolderId_(c, settings); });
+  var fileName = Utilities.formatDate(takenAt, Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm.ss') +
+    (from ? ' ' + from.replace(/[\\\/:*?"<>|]/g, '') : '') + '.jpg';
+  var file = DriveApp.getFolderById(folderId).createFile(Utilities.newBlob(Utilities.base64Decode(data), 'image/jpeg', fileName));
+  if (caption) {
+    try { file.setDescription(caption); } catch (err) { /* optional */ }
+  }
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (err) {
+    console.error('Could not share photo ' + file.getId() + ': ' + (err && err.message ? err.message : err));
+  }
+  var id = file.getId();
+
+  return withLock_(function () {
+    var again = already();
+    if (again) {
+      file.setTrashed(true);
+      return { photo: publicPhoto_(again), duplicate: true };
+    }
+    var sh = photoSheet_(c);
+    var info = photoCols_(sh);
+    var row = [];
+    for (var i = 0; i < info.width; i++) row.push('');
+    var values = {
+      uploadedAt: now, takenAt: takenAt, from: safeText_(from), caption: safeText_(caption), table: safeText_(table),
+      hidden: false, preview: DRIVE_ID_.test(id) ? '=IMAGE("https://drive.google.com/thumbnail?id=' + id + '&sz=w200")' : '',
+      link: file.getUrl(), fileId: id, width: width, height: height, uploadId: uploadId
+    };
+    Object.keys(values).forEach(function (key) { if (info.cols[key] >= 0) row[info.cols[key]] = values[key]; });
+    sh.appendRow(row);
+    SpreadsheetApp.flush();
+    return {
+      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0 }),
+      duplicate: false
+    };
+  });
+}
+
 function writeRow_(table, rowNumber, values) {
   Object.keys(values).forEach(function (key) {
     var col = table.cols[key];
@@ -946,6 +1248,7 @@ function generateCodes_(c, onlyRows) {
     if (!g.status) values.status = STATUS.none;
     if (Object.keys(values).length) writeRow_(table, g.row, values);
   });
+  if (!onlyRows) ensurePhotoSettings_(c, settings);
   return created;
 }
 
@@ -1288,6 +1591,15 @@ function setupSheets_(c) {
   var mealsRange = col(COL.mealChoices);
   rows.push(['Reception guests who still need to choose a meal',
     people(COL.reception) + '-SUMPRODUCT((LEN(TRIM(' + mealsRange + '))>0)*(LEN(' + mealsRange + ')-LEN(SUBSTITUTE(' + mealsRange + ',";",""))+1))']);
+  var photosSheet = setupPhotoSheet_(c);
+  var photoInfo = photoCols_(photosSheet);
+  function photoCol(key) {
+    var L = columnLetter_(photoInfo.cols[key] + 1);
+    return "'" + c.names.photos.replace(/'/g, "''") + "'!" + L + '2:' + L;
+  }
+  rows.push(['', '']);
+  rows.push(['Photos shared', '=COUNTA(' + photoCol('fileId') + ')']);
+  rows.push(['Photos hidden', '=COUNTIF(' + photoCol('hidden') + ',TRUE)']);
   summary.getRange(1, 1, rows.length, 2).setValues(rows);
   summary.getRange(1, 1).setFontSize(18).setFontWeight('bold').setFontColor('#15322a');
   summary.getRange(14, 1, 4, 2).setFontWeight('bold').setBackground('#f9e9eb');
@@ -1303,6 +1615,7 @@ function setupSheets_(c) {
   }
 
   // Remove the blank default tab if it's still there.
+  // (The Photos tab was set up with the Summary above.)
   var blank = ss.getSheetByName('Sheet1');
   if (blank && blank.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(blank);
 }
@@ -1311,11 +1624,35 @@ function setupSheets_(c) {
  * Spreadsheet menu
  * ===================================================================== */
 
+function setupPhotoSheet_(c) {
+  var sh = photoSheet_(c);
+  var lastCol = sh.getLastColumn();
+  var header = lastCol ? sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); }) : [];
+  if (!header.some(function (h) { return h; })) header = [];
+  PHOTO_HEADERS.forEach(function (h) { if (header.indexOf(h) < 0) header.push(h); });
+  sh.getRange(1, 1, 1, header.length).setValues([header])
+    .setFontWeight('bold').setBackground('#15322a').setFontColor('#f9e9eb').setVerticalAlignment('middle');
+  sh.setFrozenRows(1);
+  if (sh.getMaxRows() < 1000) sh.insertRowsAfter(sh.getMaxRows(), 1000 - sh.getMaxRows());
+  var maxRows = sh.getMaxRows();
+  var widths = { 'Uploaded At': 150, 'Taken At': 150, 'From': 160, 'Caption': 260, 'Table': 70, 'Hidden': 70, 'Preview': 140, 'Photo': 260, 'File ID': 140, 'Width': 70, 'Height': 70, 'Upload ID': 120 };
+  header.forEach(function (h, i) {
+    if (PHOTO_HEADER_NOTES[h]) sh.getRange(1, i + 1).setNote(PHOTO_HEADER_NOTES[h]);
+    sh.setColumnWidth(i + 1, widths[h] || 120);
+  });
+  sh.getRange(2, header.indexOf(PHOTO_COL.hidden) + 1, maxRows - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  [PHOTO_COL.uploadedAt, PHOTO_COL.takenAt].forEach(function (h) {
+    sh.getRange(2, header.indexOf(h) + 1, maxRows - 1, 1).setNumberFormat('mmm d, yyyy h:mm am/pm');
+  });
+  return sh;
+}
+
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('💌 Wedding')
     .addItem('Set up sheets', 'menuSetup')
     .addItem('Update codes, links & text messages', 'menuGenerateCodes')
     .addItem('Check guest list for problems', 'menuCheckGuestList')
+    .addItem('Show photo sharing links', 'menuPhotoLinks')
     .addSeparator()
     .addItem('Mark selected rows as invited (texted)', 'menuMarkTexted')
     .addSeparator()
@@ -1350,7 +1687,21 @@ function ui_() { return SpreadsheetApp.getUi(); }
 function menuSetup() {
   setupSheets_(ctx_());
   generateCodes_(ctx_());
+  photoFolderId_(ctx_(), readSettings_(ctx_())); // makes the Drive folder now, so photo sharing is ready
   ui_().alert('All set! Add guests on the "Guests" tab, then fill in the "Settings" tab.');
+}
+
+function menuPhotoLinks() {
+  var c = ctx_();
+  var settings = readSettings_(c);
+  ensurePhotoSettings_(c, settings);
+  photoFolderId_(c, settings);
+  ui_().alert('Photo sharing\n\n' +
+    'Table cards (open on a computer and print):\n' + setting_(settings, 'Photo Table Cards Link') + '\n\n' +
+    'Slideshow (open on the TV or projector):\n' + setting_(settings, 'Photo Slideshow Link') + '\n\n' +
+    'Photo page (what the QR codes open):\n' + setting_(settings, 'Photo Page Link') + '\n\n' +
+    'Photos are saved to:\n' + setting_(settings, 'Photo Folder') + '\n\n' +
+    'These are also on the Settings tab.');
 }
 
 function menuGenerateCodes() {
@@ -1440,7 +1791,7 @@ function runSelfTest() {
 }
 
 function selfTest_(ss) {
-  var names = { guests: '__selftest Guests', settings: '__selftest Settings', summary: '__selftest Summary', log: '__selftest Log' };
+  var names = { guests: '__selftest Guests', settings: '__selftest Settings', summary: '__selftest Summary', log: '__selftest Log', photos: '__selftest Photos' };
   var c = { ss: ss, names: names };
   var results = [];
   function check(name, fn) {

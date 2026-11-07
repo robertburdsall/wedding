@@ -1,5 +1,5 @@
 // A small in-memory imitation of the Google Apps Script services Code.gs uses
-// (SpreadsheetApp, MailApp, LockService, ContentService, Utilities, Session).
+// (SpreadsheetApp, MailApp, LockService, ContentService, Utilities, Session, CacheService, DriveApp).
 // It runs the real Code.gs file unchanged inside a Node VM so it can be tested locally.
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -192,7 +192,7 @@ export class MockSpreadsheet {
 function formatDate(date, timeZone, pattern) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
-      timeZone, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle: 'h23', weekday: 'long',
+      timeZone, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hourCycle: 'h23', weekday: 'long',
     }).formatToParts(date).map((p) => [p.type, p.value])
   );
   const month = Number(parts.month);
@@ -200,9 +200,9 @@ function formatDate(date, timeZone, pattern) {
   const tokens = {
     yyyy: parts.year, MMMM: MONTHS[month - 1][0].toUpperCase() + MONTHS[month - 1].slice(1), MM: String(month).padStart(2, '0'),
     dd: String(parts.day).padStart(2, '0'), d: String(Number(parts.day)), EEEE: parts.weekday,
-    HH: String(hour).padStart(2, '0'), h: String(hour % 12 || 12), mm: parts.minute, a: hour < 12 ? 'AM' : 'PM',
+    HH: String(hour).padStart(2, '0'), h: String(hour % 12 || 12), mm: parts.minute, ss: parts.second.padStart(2, '0'), a: hour < 12 ? 'AM' : 'PM',
   };
-  return pattern.replace(/yyyy|MMMM|MM|dd|d|EEEE|HH|h|mm|a/g, (t) => tokens[t]);
+  return pattern.replace(/yyyy|MMMM|MM|dd|d|EEEE|HH|h|mm|ss|a/g, (t) => tokens[t]);
 }
 
 /**
@@ -221,6 +221,39 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
     now() { return Date.now() + this.offsetMs; },
     advance(ms) { this.offsetMs += ms; },
   };
+
+  // DriveApp: folders and files kept in memory (drive.folders / drive.files).
+  const drive = { folders: new Map(), files: new Map(), failSharing: false };
+  const driveId = () => '1' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 8);
+  function makeFile(blob, folder) {
+    const file = {
+      id: driveId(), name: blob.getName(), bytes: blob.bytes, contentType: blob.getContentType(), folder: folder.id,
+      sharing: null, trashed: false, description: '',
+      getId() { return this.id; },
+      getName() { return this.name; },
+      getUrl() { return `https://drive.google.com/file/d/${this.id}/view?usp=drivesdk`; },
+      setSharing(access, permission) {
+        if (drive.failSharing) throw new Error('Sharing is not allowed for this account.');
+        this.sharing = { access, permission };
+        return this;
+      },
+      setTrashed(v) { this.trashed = !!v; return this; },
+      setDescription(d) { this.description = d; return this; },
+    };
+    drive.files.set(file.id, file);
+    return file;
+  }
+  function makeFolder(name) {
+    const folder = {
+      id: driveId(), name,
+      getId() { return this.id; },
+      getName() { return this.name; },
+      getUrl() { return `https://drive.google.com/drive/folders/${this.id}`; },
+      createFile(blob) { return makeFile(blob, this); },
+    };
+    drive.folders.set(folder.id, folder);
+    return folder;
+  }
 
   const env = {
     Date, // share the Date class so `instanceof Date` works across the VM boundary
@@ -268,7 +301,28 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
         return out;
       },
     },
-    Utilities: { formatDate, getUuid: () => randomUUID() },
+    Utilities: {
+      formatDate,
+      getUuid: () => randomUUID(),
+      // Like Apps Script: bytes are signed (-128..127).
+      base64Decode: (s) => Array.from(Buffer.from(String(s), 'base64'), (b) => (b > 127 ? b - 256 : b)),
+      newBlob: (bytes, contentType, name) => ({
+        bytes: Buffer.from(Array.from(bytes, (b) => b & 255)),
+        getBytes() { return Array.from(this.bytes, (b) => (b > 127 ? b - 256 : b)); },
+        getContentType: () => contentType,
+        getName: () => name,
+      }),
+    },
+    DriveApp: {
+      Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE' },
+      Permission: { VIEW: 'VIEW', EDIT: 'EDIT' },
+      createFolder: (name) => makeFolder(name),
+      getFolderById(id) {
+        const f = drive.folders.get(String(id));
+        if (!f) throw new Error('No item with the given ID could be found, or you do not have permission to access it.');
+        return f;
+      },
+    },
     CacheService: {
       getScriptCache: () => ({
         get(key) {
@@ -308,7 +362,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
     },
     set(t, prop, value) { t[prop] = value; return true; },
   });
-  return { gs, ss, mail, ui, lock, logs, cache, timeZone };
+  return { gs, ss, mail, ui, lock, logs, cache, drive, timeZone };
 }
 
 /** Sets up the sheets and adds guests. Each guest is an object keyed by column header. */

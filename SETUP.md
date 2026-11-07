@@ -20,16 +20,17 @@ This takes about 30–45 minutes the first time. Do the steps in order.
 5. Click **Save**, then go back to the sheet tab and **reload the page**. A **💌 Wedding** menu appears after a few seconds.
 6. Choose **💌 Wedding → Set up sheets**. Google asks you to authorize the script:
    - Choose your account. You'll see *"Google hasn't verified this app"*. That's expected, because it's your own script. Click **Advanced → Go to (project name) (unsafe) → Allow**.
-   - It asks permission to edit **this** spreadsheet, send email as you, and show menus. Nothing else.
+   - It asks permission to edit **this** spreadsheet, send email as you, show menus, and use Google Drive. Drive is only used to save photos guests share at the reception into one folder it creates (see "Photo sharing at the reception").
 7. Choose **💌 Wedding → Run self-test**. You should see **"✅ All N checks passed."** It works in temporary tabs, sends no emails, and cleans up after itself.
 
-You now have four tabs:
+You now have five tabs:
 
 | Tab | What it's for |
 |---|---|
 | **Guests** | One row per household/invitation. White columns are yours to fill in. Grey columns are filled in automatically. |
 | **Summary** | Live totals: invites sent and opened, plus ones coming or not, households responded, plus how many people are attending or have declined the ceremony, and the same for the reception. |
 | **Settings** | Times, venues, RSVP deadline, email options. |
+| **Photos** | One row per photo shared at the reception. Tick **Hidden** to take one off the timeline. |
 | **RSVP Log** | Every response ever submitted, including changes. Useful if someone says "but I RSVP'd!" |
 
 ## 2. Publish the script as a web app
@@ -149,6 +150,38 @@ Every *Wedding + Reception* household also gets a **Meal Link** (`yourdomain.com
 - The choices come from **Meal Options** on the Settings tab (`North Atlantic Salmon / Filet Mignon`). If the caterer changes the menu, edit that cell and run **💌 Wedding → Set up sheets** so the Summary counts the new options.
 - Ceremony-only guests can't open the meal page.
 
+## Photo sharing at the reception
+
+Guests scan a QR code on their table to add photos from their phone, with no app needed. Everyone sees every photo on a timeline in the order they were taken. A slideshow page can run on a TV or projector and shows new photos within about 20 seconds.
+
+**Where things go**
+
+- Photos are saved to a Google Drive folder, made automatically the first time you run **Set up sheets** (called *Stephanie & Robert — Wedding Photos*). After the wedding, right-click the folder → **Download** to keep them all.
+- Each photo gets a row on the **Photos** tab: when it was taken, who shared it (if they typed a name), their note, their table and a small preview.
+- **To take a photo down,** tick **Hidden** on its row. It disappears from the timeline and slideshow within a minute, and the file stays in your folder. Deleting the row works too.
+- Phones shrink photos to 3000 pixels on the long side before uploading, which keeps uploads quick on venue signal and is still plenty for prints. This also strips location data.
+- Photos only. Videos are skipped with a short note to the guest.
+
+**Who can see the photos**
+
+Only people with the **Photo Code**, which is printed on the table cards and found on the Settings tab. The photo pages aren't linked from the main website and search engines are told to ignore them. Each photo file is shared as "anyone with the link" (that's how the timeline shows it), but the links are only given to people who have the code. To shut out an old code (say, a test card you printed), clear **Photo Code** on Settings and a new one is made. Then print the cards again.
+
+**Settings**
+
+| Setting | What it does |
+|---|---|
+| Photo Code | The secret code on the cards. Filled in automatically. |
+| Photo Uploads Until | Last day guests can add photos, for example two weeks after the wedding. Blank = no end. The timeline stays viewable after that. |
+| Photo Moments | Optional names for parts of the day, by start time, for example `3:00 PM Getting ready / 4:00 PM Ceremony / 5:00 PM Cocktail hour / 7:00 PM Dinner / 8:30 PM Dancing`. The timeline puts each photo from the wedding day (the **Ceremony Date**) under the moment it was taken in. Photos from other days are grouped by day. |
+| Photo Folder | Filled in automatically. Paste a link to a different Drive folder of yours if you'd rather use your own. |
+| Photo Page Link, Photo Slideshow Link, Photo Table Cards Link | Filled in automatically. Also shown by **💌 Wedding → Show photo sharing links**. |
+
+**Before the wedding**
+
+1. Open the **Photo Table Cards Link** on a computer. Set the number of tables and print (two 5×7 cards per letter page, landscape). Cut along the dashed lines.
+2. Test it: scan a card with your phone, share a couple of photos, and check they show on the timeline and on the Photos tab. Then tick **Hidden** on the test photos.
+3. If you'll have a screen at the reception, open the **Photo Slideshow Link** on the laptop connected to it and click once for full screen. It runs on its own, keeps the screen awake, and shows a QR code in the corner.
+
 ## Updating the script later
 
 Whenever a new version of `apps-script/Code.gs` comes along:
@@ -158,7 +191,11 @@ Whenever a new version of `apps-script/Code.gs` comes along:
 3. **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The web app URL stays the same.
 4. Check it's live: open your web app URL with `?action=ping` on the end (for example `https://script.google.com/macros/s/…/exec?action=ping`). It should show the `VERSION` from the top of the new `Code.gs`. If it shows an older number, step 3 didn't take, so try it again.
 
+If [`apps-script/appsscript.json`](apps-script/appsscript.json) changed too (version 2.0.0 added Google Drive access for photo sharing), replace that file in the editor as well before step 2. **Set up sheets** then asks you to authorize again. Google warns that the script can see your Drive files: it only ever uses its own photo folder.
+
 ## Security notes
+
+- The photo pages need the Photo Code. Wrong codes count toward the same 60-in-10-minutes limit as invitation codes. Only JPEG photos are accepted, up to about 10 MB.
 
 - Codes are 8 random characters (about 850 billion possibilities). If someone tries lots of wrong codes (60 in 10 minutes), the site pauses all lookups until that 10-minute window ends, so codes can't be guessed.
 - Each household gets at most one confirmation email (and you one notification) every 10 minutes. Someone re-submitting over and over can't flood inboxes or use up your daily email limit. Every RSVP is still saved.
@@ -206,3 +243,6 @@ This runs about 130 automated tests covering the RSVP backend (in a simulated Go
 | *"We couldn't reach the RSVP service"* | Check the web app access is **Anyone** and the URL ends in `/exec`. |
 | *"This invitation isn't quite ready yet"* | That row has no **Invite Type** (or no names). |
 | No 💌 Wedding menu | Reload the sheet and wait a few seconds. |
+| Photo page says *"Photo sharing isn't open yet"* | The web app is running a `Code.gs` older than 2.0.0, or **Set up sheets** hasn't been run since updating. |
+| A photo on the timeline shows *"Still processing…"* | Google Drive takes a few seconds to make the small version of a new photo. It appears on the next refresh. If it never does, check the file in the Drive folder is shared as "Anyone with the link". |
+| *"Exception: You do not have permission to call DriveApp"* | Replace `appsscript.json` with the repo's version and run **Set up sheets** again to authorize Drive. |
