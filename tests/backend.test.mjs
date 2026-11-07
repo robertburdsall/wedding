@@ -45,7 +45,7 @@ describe('sheet setup', () => {
     assert.deepEqual(env.ss.getSheets().map((s) => s.getName()), ['Guests', 'Summary', 'Settings', 'RSVP Log']);
     assert.deepEqual(env.ss.getSheetByName('Guests').rows()[0], [
       'Code', 'Guest Names', 'Email', 'Invite Type', 'Plus One', 'RSVP Status', 'Ceremony Attending',
-      'Reception Attending', 'Ceremony Declined', 'Reception Declined', 'Plus One Name', 'Responded At', 'Invite Sent At', 'Invite Opened At', 'Reminder Sent At', 'Invite Link', 'Text Message', 'Party Size', 'Notes',
+      'Reception Attending', 'Ceremony Declined', 'Reception Declined', 'Plus One Name', 'Plus One Status', 'Responded At', 'Invite Sent At', 'Invite Opened At', 'Reminder Sent At', 'Invite Link', 'Text Message', 'Party Size', 'Notes',
     ]);
     const settingKeys = env.ss.getSheetByName('Settings').rows().map((r) => r[0]);
     assert.equal(settingKeys[0], 'Setting');
@@ -57,8 +57,9 @@ describe('sheet setup', () => {
     const env = setup();
     const sheet = env.sheet;
     // The family adds their own column and changes a setting.
-    sheet.getRange(1, 20).setValue('Table #');
-    sheet.getRange(2, 20).setValue('7');
+    const free = sheet.getLastColumn() + 1;
+    sheet.getRange(1, free).setValue('Table #');
+    sheet.getRange(2, free).setValue('7');
     setSettings(env, { 'Ceremony Venue': 'Changed Venue' });
     const before = sheet.rows();
 
@@ -92,7 +93,9 @@ describe('sheet setup', () => {
     assert.match(formulas['Reception: declined (people)'], /'Guests'!J2:J/);
     assert.equal(formulas['"Ceremony Only" households'], `=COUNTIF('Guests'!D2:D,"${CER}")`);
     assert.equal(formulas['Households waiting on'], '=B3-B10');
-    assert.match(formulas['Invites opened'], /=COUNTA\('Guests'!N2:N\)/);
+    assert.match(formulas['Invites opened'], /=COUNTA\('Guests'!O2:O\)/);
+    assert.equal(formulas['Plus ones coming'], `=COUNTIF('Guests'!L2:L,"Bringing a guest")`);
+    assert.equal(formulas['Plus ones not coming'], `=COUNTIF('Guests'!L2:L,"Not bringing a guest")`);
     assert.equal(summary.getRange(3, 1).getValue(), 'Households invited');
     assert.equal(summary.getRange(10, 1).getValue(), 'Households responded');
   });
@@ -1387,6 +1390,68 @@ describe('formal names ("Mr. & Mrs. …")', () => {
     const problems = env.gs.validateGuestList_(env.c).join('\n');
     assert.doesNotMatch(problems, /Row [234]:.*separate/);
     assert.match(problems, /Row 5: separate guest names with commas, or write couples as "Mr\. & Mrs\. Full Name" \(couldn't split "Mary Ann & Joe Smith"\)/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+describe('plus one status column', () => {
+  const status = (env, i) => env.row(i)['Plus One Status'];
+
+  test('blank when no plus one was offered; "Waiting for RSVP" until they reply', () => {
+    const env = setup(); // rows: Smiths (no +1), Carol (+1), Browns (no +1), Gina (+1)
+    assert.deepEqual(env.sheet.objects().map((r) => r['Plus One Status']), ['', 'Waiting for RSVP', '', 'Waiting for RSVP']);
+  });
+
+  test('"Not bringing a guest" when they RSVP without one (blank Plus One Name)', () => {
+    const env = setup();
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: ['Carol Jones'] }, { name: '', ceremony: false, reception: false });
+    assert.equal(env.row(1)['Plus One Name'], '');
+    assert.equal(status(env, 1), 'Not bringing a guest');
+  });
+
+  test('"Not bringing a guest" when they name a guest but mark them not attending', () => {
+    const env = setup();
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: [] }, { name: 'Maybe Person', ceremony: false, reception: false });
+    assert.equal(status(env, 1), 'Not bringing a guest');
+  });
+
+  test('"Bringing a guest" when their guest is coming, and it updates if they change their answer', () => {
+    const env = setup();
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: [] }, { name: 'Sam Plus', ceremony: true, reception: false });
+    assert.equal(status(env, 1), 'Bringing a guest');
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: [] }, { name: '', ceremony: false, reception: false });
+    assert.equal(status(env, 1), 'Not bringing a guest');
+  });
+
+  test('works for "& Guest" households', () => {
+    const env = setup({ guests: [{ 'Guest Names': 'Mr. Sample Person & Guest', 'Invite Type': FULL }] });
+    assert.equal(status(env, 0), 'Waiting for RSVP');
+    rsvp(env, 0, { ceremony: ['Mr. Sample Person'], reception: ['Mr. Sample Person'] });
+    assert.equal(status(env, 0), 'Not bringing a guest');
+  });
+
+  test('declining the whole invitation also shows "Not bringing a guest"', () => {
+    const env = setup();
+    rsvp(env, 3, { ceremony: [] });
+    assert.equal(status(env, 3), 'Not bringing a guest');
+  });
+
+  test('upgrading fills it in for RSVPs that came in before the column existed', () => {
+    const env = createGas();
+    const g = env.ss.insertSheet('Guests');
+    g.appendRow(['Code', 'Guest Names', 'Email', 'Invite Type', 'Plus One', 'RSVP Status', 'Ceremony Attending', 'Reception Attending', 'Plus One Name', 'Responded At']);
+    g.appendRow(['ABCDEFGH', 'Mr. Early Bird & Guest', '', FULL, '', 'Attending', 'Mr. Early Bird', 'Mr. Early Bird', '', '']);
+    g.appendRow(['HGFEDCBA', 'Other Early', '', CER, 'Yes', 'Attending', 'Other Early, Their Pal', '', 'Their Pal', '']);
+    env.gs.menuSetup();
+    const rows = g.objects();
+    assert.equal(rows[0]['Plus One Status'], 'Not bringing a guest');
+    assert.equal(rows[1]['Plus One Status'], 'Bringing a guest');
+  });
+
+  test('the Summary counts plus ones coming, not coming, and still waiting', () => {
+    const env = setup();
+    const labels = env.ss.getSheetByName('Summary').rows().map((r) => r[0]);
+    for (const l of ['Plus ones coming', 'Plus ones not coming', 'Plus ones still waiting on an RSVP']) assert.ok(labels.includes(l), l);
   });
 });
 

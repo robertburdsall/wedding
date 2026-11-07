@@ -10,7 +10,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '1.5.0';
+var VERSION = '1.6.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log' };
 
@@ -27,6 +27,7 @@ var COL = {
   ceremonyDeclined: 'Ceremony Declined',
   receptionDeclined: 'Reception Declined',
   plusOneName: 'Plus One Name',
+  plusOneStatus: 'Plus One Status',
   respondedAt: 'Responded At',
   sentAt: 'Invite Sent At',
   openedAt: 'Invite Opened At',
@@ -37,8 +38,8 @@ var COL = {
   notes: 'Notes'
 };
 var GUEST_HEADERS = [COL.code, COL.names, COL.email, COL.type, COL.plusOne, COL.status, COL.ceremony,
-  COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.respondedAt, COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize, COL.notes];
-var AUTO_HEADERS = [COL.code, COL.status, COL.ceremony, COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.respondedAt,
+  COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt, COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize, COL.notes];
+var AUTO_HEADERS = [COL.code, COL.status, COL.ceremony, COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt,
   COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize];
 var GUEST_HEADER_NOTES = {
   'Code': 'Filled in automatically. Each household gets a unique code for its personal invite link.',
@@ -52,7 +53,8 @@ var GUEST_HEADER_NOTES = {
   'Reception Attending': 'Filled in automatically: who is coming to the reception.',
   'Ceremony Declined': 'Filled in automatically: who on this invitation said no to the ceremony. Plus ones are not counted.',
   'Reception Declined': 'Filled in automatically: who on this invitation said no to the reception. Plus ones are not counted.',
-  'Plus One Name': 'Filled in automatically from the RSVP form.',
+  'Plus One Name': 'Filled in automatically from the RSVP form, only when their guest is coming.',
+  'Plus One Status': 'Filled in automatically for households offered a plus one: Waiting for RSVP, Bringing a guest, or Not bringing a guest. Blank = no plus one offered.',
   'Invite Link': 'Filled in automatically. The personal link for this household.',
   'Text Message': 'Filled in automatically: a ready-to-send text with their link. Copy it into your phone. Change the wording on the Settings tab.',
   'Invite Sent At': 'Filled in when the invite is emailed, or when you use Wedding → Mark selected rows as invited (texted).',
@@ -62,6 +64,7 @@ var GUEST_HEADER_NOTES = {
 var TYPE_FULL = 'Wedding + Reception';
 var TYPE_CEREMONY = 'Ceremony Only';
 var STATUS = { none: 'Not responded', attending: 'Attending', declined: 'Declined' };
+var PLUS_ONE_STATUS = { waiting: 'Waiting for RSVP', bringing: 'Bringing a guest', notBringing: 'Not bringing a guest' };
 
 var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var CODE_LENGTH = 8; // 31^8 ≈ 850 billion possible codes
@@ -242,6 +245,7 @@ function guestFromRow_(row, cols, rowNumber) {
     ceremonyDeclined: String(get('ceremonyDeclined')).trim(),
     receptionDeclined: String(get('receptionDeclined')).trim(),
     plusOneName: String(get('plusOneName')).trim(),
+    plusOneStatus: String(get('plusOneStatus')).trim(),
     respondedAt: get('respondedAt'),
     sentAt: get('sentAt'),
     openedAt: get('openedAt'),
@@ -523,6 +527,14 @@ function declined_(g) {
   return { ceremonyDeclined: no(g.ceremony), receptionDeclined: g.type === 'full' ? no(g.reception) : '' };
 }
 
+// One clear word on whether a household's plus one is coming. Blank when no plus one was offered.
+function plusOneStatus_(g) {
+  if (!g.plusOneAllowed) return '';
+  if (!hasResponded_(g)) return PLUS_ONE_STATUS.waiting;
+  var coming = !!g.plusOneName && g.ceremony.concat(g.reception).some(function (n) { return sameName_(n, g.plusOneName); });
+  return coming ? PLUS_ONE_STATUS.bringing : PLUS_ONE_STATUS.notBringing;
+}
+
 function pickNames_(list, allowed) {
   return allowed.filter(function (name) {
     return list.some(function (n) { return sameName_(n, name); });
@@ -632,6 +644,7 @@ function submitRsvp_(c, body, now) {
     g.plusOneName = poName;
     g.respondedAt = now;
     writeRow_(table, g.row, declined_(g));
+    writeRow_(table, g.row, { plusOneStatus: plusOneStatus_(g) });
     markOpened_(table, g, now);
 
     appendLog_(c, now, g, body);
@@ -751,6 +764,8 @@ function generateCodes_(c, onlyRows) {
     var dec = declined_(g);
     if (table.cols.ceremonyDeclined >= 0 && g.ceremonyDeclined !== dec.ceremonyDeclined) values.ceremonyDeclined = dec.ceremonyDeclined;
     if (table.cols.receptionDeclined >= 0 && g.receptionDeclined !== dec.receptionDeclined) values.receptionDeclined = dec.receptionDeclined;
+    var poStatus = plusOneStatus_(g);
+    if (table.cols.plusOneStatus >= 0 && g.plusOneStatus !== poStatus) values.plusOneStatus = poStatus;
     if (!g.status) values.status = STATUS.none;
     if (Object.keys(values).length) writeRow_(table, g.row, values);
   });
@@ -1009,7 +1024,7 @@ function setupSheets_(c) {
       cell.setBackground('#4f7f6c');
       guests.getRange(2, col, maxRows - 1, 1).setBackground('#f4f6f5');
     }
-    var widths = { 'Guest Names': 260, 'Email': 220, 'Invite Type': 160, 'Ceremony Attending': 220, 'Reception Attending': 220, 'Ceremony Declined': 200, 'Reception Declined': 200, 'Invite Link': 280, 'Text Message': 420, 'Notes': 220 };
+    var widths = { 'Guest Names': 260, 'Email': 220, 'Invite Type': 160, 'Ceremony Attending': 220, 'Reception Attending': 220, 'Ceremony Declined': 200, 'Reception Declined': 200, 'Plus One Status': 170, 'Invite Link': 280, 'Text Message': 420, 'Notes': 220 };
     guests.setColumnWidth(col, widths[h] || 130);
   });
   var typeCol = header.indexOf(COL.type) + 1;
@@ -1024,10 +1039,14 @@ function setupSheets_(c) {
   });
 
   var statusRange = guests.getRange(2, header.indexOf(COL.status) + 1, maxRows - 1, 1);
+  var plusOneRange = guests.getRange(2, header.indexOf(COL.plusOneStatus) + 1, maxRows - 1, 1);
   guests.setConditionalFormatRules([
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(STATUS.attending).setBackground('#d6eadf').setFontColor('#1d4437').setRanges([statusRange]).build(),
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(STATUS.declined).setBackground('#f2d3d8').setFontColor('#7a3b47').setRanges([statusRange]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(STATUS.none).setFontColor('#8a948f').setRanges([statusRange]).build()
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(STATUS.none).setFontColor('#8a948f').setRanges([statusRange]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(PLUS_ONE_STATUS.bringing).setBackground('#d6eadf').setFontColor('#1d4437').setRanges([plusOneRange]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(PLUS_ONE_STATUS.notBringing).setBackground('#f2d3d8').setFontColor('#7a3b47').setRanges([plusOneRange]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(PLUS_ONE_STATUS.waiting).setFontColor('#8a948f').setRanges([plusOneRange]).build()
   ]);
 
   // Settings
@@ -1075,7 +1094,11 @@ function setupSheets_(c) {
     ['Ceremony: attending (people, incl. plus ones)', people(COL.ceremony)],
     ['Ceremony: declined (people)', people(COL.ceremonyDeclined)],
     ['Reception: attending (people, incl. plus ones)', people(COL.reception)],
-    ['Reception: declined (people)', people(COL.receptionDeclined)]
+    ['Reception: declined (people)', people(COL.receptionDeclined)],
+    ['', ''],
+    ['Plus ones coming', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.bringing + '")'],
+    ['Plus ones not coming', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.notBringing + '")'],
+    ['Plus ones still waiting on an RSVP', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.waiting + '")']
   ];
   summary.getRange(1, 1, rows.length, 2).setValues(rows);
   summary.getRange(1, 1).setFontSize(18).setFontWeight('bold').setFontColor('#15322a');

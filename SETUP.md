@@ -28,7 +28,7 @@ You now have four tabs:
 | Tab | What it's for |
 |---|---|
 | **Guests** | One row per household/invitation. White columns are yours to fill in. Grey columns are filled in automatically. |
-| **Summary** | Live totals: invites sent and opened, households responded, plus how many people are attending or have declined the ceremony, and the same for the reception. |
+| **Summary** | Live totals: invites sent and opened, plus ones coming or not, households responded, plus how many people are attending or have declined the ceremony, and the same for the reception. |
 | **Settings** | Times, venues, RSVP deadline, email options. |
 | **RSVP Log** | Every response ever submitted, including changes. Useful if someone says "but I RSVP'd!" |
 
