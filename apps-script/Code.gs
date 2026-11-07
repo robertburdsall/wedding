@@ -99,7 +99,7 @@ var SETTINGS_DEFAULTS = [
   ['Full Invite: First Name', 'Stephanie', 'Wedding + Reception card: the first name, in script.'],
   ['Full Invite: Joiner', 'and', 'Wedding + Reception card: the small script word between the names.'],
   ['Full Invite: Second Name', 'Robert', 'Wedding + Reception card: the second name, in script.'],
-  ['Full Invite: Under Names', '', 'Wedding + Reception card: an optional line under the names. Leave it blank to leave it off; the names then center themselves.'],
+  ['Full Invite: Under Names', '', 'Wedding + Reception card: an optional line under the names. Leave it blank to leave it off; the request lines and names then center themselves between the hosts and the date.'],
   ['Ceremony Invite: Intro', 'You are invited to', 'Ceremony Only card: the top line.'],
   ['Ceremony Invite: Names', "Stephanie & Robert's", 'Ceremony Only card: the names, in script. Keep the " & " to get the decorative ampersand.'],
   ['Ceremony Invite: Title', 'Wedding', 'Ceremony Only card: the large word under the names.'],

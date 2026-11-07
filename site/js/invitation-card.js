@@ -32,8 +32,8 @@ window.InvitationCard = (function () {
       // lines keep the block centered where the template's was.
       { key: 'hosts', ...BIG, y: 356, pitch: 57, dx: -7, block: true, templateLines: 1 },
       { key: 'request', ...SMALL, y: 419, pitch: 53, block: true, templateLines: 2 },
-      // The names: when the line under them is left blank, they move down to sit centered
-      // between the hosts block and the date (see centeredNames below).
+      // The names: when the line under them is left blank, the card switches to a centered
+      // layout (see centeredLayout below).
       { key: 'firstName', script: true, fs: 119.2, y: 703, dx: 2, maxW: 1150, filter: EMBOSS, names: true },
       { key: 'joiner', script: true, fs: 110.5, y: 840, dx: 3, maxW: 400, filter: EMBOSS, names: true },
       { key: 'secondName', script: true, fs: 110.5, y: 993, dx: 3.5, maxW: 1150, filter: EMBOSS, names: true },
@@ -53,7 +53,9 @@ window.InvitationCard = (function () {
   // Where the names' lettering starts and ends on the template (top of the first name's loops,
   // bottom of the second name), and the line they're centered under when moved.
   const NAMES_INK = { top: 584, bottom: 1017 };
-  const TEMPLATE_TOP_BLOCK_END = 472;
+  // The centered layout: request lines a little smaller than the template's, sitting just
+  // above the names.
+  const CENTERED = { requestFs: 40, requestPitch: 46, gapToNames: 60 };
 
   // The ceremony card's decorative ampersand, cut from the template, and the spacing around it.
   const AMP = { href: 'ampersand.png', w: 136, h: 166, y: 686, gapBefore: 29, gapAfter: -8, center: 719 };
@@ -107,17 +109,36 @@ window.InvitationCard = (function () {
     return positions;
   }
 
-  // How far to move the names down. Zero when the line under the names is used (the template's
-  // own layout); otherwise enough to center them between the hosts block and the date.
-  function centeredNames(layout, invitation, blockPositions) {
-    const nameSpecs = layout.filter((s) => s.names);
-    const under = layout.find((s) => s.key === 'underNames');
-    const when = layout.find((s) => s.key === 'when');
-    if (!nameSpecs.length || !under || !when || splitLines(invitation[under.key]).length) return 0;
-    const above = [...blockPositions.values()].flat();
-    const top = above.length ? Math.max(...above) : TEMPLATE_TOP_BLOCK_END;
+  // With the line under the names left blank: hosts stay at the top, and the request lines
+  // (a little smaller) sit just above the names, with that group centered between the hosts
+  // and the date. Returns null to keep the template's own layout.
+  function centeredLayout(layout, invitation) {
+    const get = (key) => layout.find((s) => s.key === key);
+    const hosts = get('hosts');
+    const request = get('request');
+    const under = get('underNames');
+    const when = get('when');
+    if (!hosts || !request || !under || !when || splitLines(invitation[under.key]).length) return null;
+
+    const hostYs = splitLines(invitation[hosts.key]).map((_, i) => hosts.y + i * hosts.pitch);
+    const requestCount = splitLines(invitation[request.key]).length;
+    const top = hostYs.length ? hostYs[hostYs.length - 1] : hosts.y - hosts.fs * 0.66;
     const bottom = when.y - when.fs * 0.66;
-    return (top + bottom) / 2 - (NAMES_INK.top + NAMES_INK.bottom) / 2;
+    const requestCap = CENTERED.requestFs * 0.66;
+    const requestHeight = requestCount
+      ? requestCap + (requestCount - 1) * CENTERED.requestPitch + CENTERED.gapToNames
+      : 0;
+    const groupHeight = requestHeight + (NAMES_INK.bottom - NAMES_INK.top);
+    const groupTop = top + (bottom - top - groupHeight) / 2;
+
+    return {
+      positions: new Map([
+        [hosts, hostYs],
+        [request, Array.from({ length: requestCount }, (_, i) => groupTop + requestCap + i * CENTERED.requestPitch)],
+      ]),
+      sizes: new Map([[request, CENTERED.requestFs]]),
+      namesShift: groupTop + requestHeight - NAMES_INK.top,
+    };
   }
 
   // Typographic apostrophes and quotes, like the printed card.
@@ -162,8 +183,9 @@ window.InvitationCard = (function () {
     for (const [x1, y1, x2, y2] of FRAME) svg.append(el('line', { x1, y1, x2, y2, stroke: '#333', 'stroke-width': 3 }));
 
     const spoken = [];
-    const blockPositions = topBlock(layout, invitation);
-    const namesShift = centeredNames(layout, invitation, blockPositions);
+    const centered = centeredLayout(layout, invitation);
+    const positions = centered ? centered.positions : topBlock(layout, invitation);
+    const namesShift = centered ? centered.namesShift : 0;
     for (const spec of layout) {
       if (spec.image) {
         const i = spec.image;
@@ -177,8 +199,10 @@ window.InvitationCard = (function () {
         continue;
       }
       const lines = splitLines(value);
-      const ys = blockPositions.get(spec) || lines.map((_, i) => spec.y + i * (spec.pitch || 0) + (spec.names ? namesShift : 0));
-      lines.forEach((line, i) => svg.append(textLine(spec, line, ys[i])));
+      const ys = positions.get(spec) || lines.map((_, i) => spec.y + i * (spec.pitch || 0) + (spec.names ? namesShift : 0));
+      const size = centered && centered.sizes.get(spec);
+      const lineSpec = size ? { ...spec, fs: size } : spec;
+      lines.forEach((line, i) => svg.append(textLine(lineSpec, line, ys[i])));
       spoken.push(lines.join(', '));
     }
     svg.setAttribute('aria-label', spoken.filter(Boolean).join('. '));
@@ -231,5 +255,5 @@ window.InvitationCard = (function () {
     ]).catch(() => {});
   }
 
-  return { render, fit, fontsReady, LAYOUTS, splitLines, topBlock, centeredNames };
+  return { render, fit, fontsReady, LAYOUTS, splitLines, topBlock, centeredLayout };
 })();
