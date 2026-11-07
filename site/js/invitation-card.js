@@ -32,9 +32,11 @@ window.InvitationCard = (function () {
       // lines keep the block centered where the template's was.
       { key: 'hosts', ...BIG, y: 356, pitch: 57, dx: -7, block: true, templateLines: 1 },
       { key: 'request', ...SMALL, y: 419, pitch: 53, block: true, templateLines: 2 },
-      { key: 'firstName', script: true, fs: 119.2, y: 703, dx: 2, maxW: 1150, filter: EMBOSS },
-      { key: 'joiner', script: true, fs: 110.5, y: 840, dx: 3, maxW: 400, filter: EMBOSS },
-      { key: 'secondName', script: true, fs: 110.5, y: 993, dx: 3.5, maxW: 1150, filter: EMBOSS },
+      // The names: when the line under them is left blank, they move down to sit centered
+      // between the hosts block and the date (see centeredNames below).
+      { key: 'firstName', script: true, fs: 119.2, y: 703, dx: 2, maxW: 1150, filter: EMBOSS, names: true },
+      { key: 'joiner', script: true, fs: 110.5, y: 840, dx: 3, maxW: 400, filter: EMBOSS, names: true },
+      { key: 'secondName', script: true, fs: 110.5, y: 993, dx: 3.5, maxW: 1150, filter: EMBOSS, names: true },
       { key: 'underNames', ...BIG, y: 1162, pitch: 57 },
       { key: 'when', ...SMALL, y: 1322, pitch: 59.5, dx: 18 },
       { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4 },
@@ -48,6 +50,11 @@ window.InvitationCard = (function () {
       { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4 },
     ],
   };
+  // Where the names' lettering starts and ends on the template (top of the first name's loops,
+  // bottom of the second name), and the line they're centered under when moved.
+  const NAMES_INK = { top: 584, bottom: 1017 };
+  const TEMPLATE_TOP_BLOCK_END = 472;
+
   // The ceremony card's decorative ampersand, cut from the template, and the spacing around it.
   const AMP = { href: 'ampersand.png', w: 136, h: 166, y: 686, gapBefore: 29, gapAfter: -8, center: 719 };
 
@@ -100,6 +107,19 @@ window.InvitationCard = (function () {
     return positions;
   }
 
+  // How far to move the names down. Zero when the line under the names is used (the template's
+  // own layout); otherwise enough to center them between the hosts block and the date.
+  function centeredNames(layout, invitation, blockPositions) {
+    const nameSpecs = layout.filter((s) => s.names);
+    const under = layout.find((s) => s.key === 'underNames');
+    const when = layout.find((s) => s.key === 'when');
+    if (!nameSpecs.length || !under || !when || splitLines(invitation[under.key]).length) return 0;
+    const above = [...blockPositions.values()].flat();
+    const top = above.length ? Math.max(...above) : TEMPLATE_TOP_BLOCK_END;
+    const bottom = when.y - when.fs * 0.66;
+    return (top + bottom) / 2 - (NAMES_INK.top + NAMES_INK.bottom) / 2;
+  }
+
   // Typographic apostrophes and quotes, like the printed card.
   const curly = (s) => String(s).replace(/'/g, '’');
 
@@ -143,6 +163,7 @@ window.InvitationCard = (function () {
 
     const spoken = [];
     const blockPositions = topBlock(layout, invitation);
+    const namesShift = centeredNames(layout, invitation, blockPositions);
     for (const spec of layout) {
       if (spec.image) {
         const i = spec.image;
@@ -156,7 +177,7 @@ window.InvitationCard = (function () {
         continue;
       }
       const lines = splitLines(value);
-      const ys = blockPositions.get(spec) || lines.map((_, i) => spec.y + i * (spec.pitch || 0));
+      const ys = blockPositions.get(spec) || lines.map((_, i) => spec.y + i * (spec.pitch || 0) + (spec.names ? namesShift : 0));
       lines.forEach((line, i) => svg.append(textLine(spec, line, ys[i])));
       spoken.push(lines.join(', '));
     }
@@ -210,5 +231,5 @@ window.InvitationCard = (function () {
     ]).catch(() => {});
   }
 
-  return { render, fit, fontsReady, LAYOUTS, splitLines, topBlock };
+  return { render, fit, fontsReady, LAYOUTS, splitLines, topBlock, centeredNames };
 })();
