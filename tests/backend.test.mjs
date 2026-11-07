@@ -1078,7 +1078,15 @@ describe('invitation cards', () => {
       underNames: ['son of Mr. and Mrs. Example'],
       when: ['Saturday, the sixth of June', 'two thousand ninety-nine', "at four o'clock in the afternoon"],
       where: ['123 Placeholder Ave, Springfield'],
+      closing: ['Reception to follow'],
     });
+  });
+
+  test('the closing line can be changed or cleared, and never reaches ceremony-only guests', () => {
+    const env = setup({ settings: { ...CARD, 'Full Invite: Closing Line': '' } });
+    assert.deepEqual(apiGet(env, { code: env.code(0) }).data.invitation.closing, []);
+    const raw = JSON.stringify(apiGet(env, { code: env.code(2) }));
+    assert.ok(!raw.includes('closing') && !/reception to follow/i.test(raw));
   });
 
   test('Ceremony Only guests get the "You are invited to" card and none of the formal card wording', () => {

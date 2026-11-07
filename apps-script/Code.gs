@@ -10,7 +10,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '1.7.0';
+var VERSION = '1.8.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log' };
 
@@ -100,6 +100,7 @@ var SETTINGS_DEFAULTS = [
   ['Full Invite: Joiner', 'and', 'Wedding + Reception card: the small script word between the names.'],
   ['Full Invite: Second Name', 'Robert', 'Wedding + Reception card: the second name, in script.'],
   ['Full Invite: Under Names', '', 'Wedding + Reception card: an optional line under the names. Leave it blank to leave it off; the request lines and names then center themselves between the hosts and the date.'],
+  ['Full Invite: Closing Line', 'Reception to follow', 'Wedding + Reception card: a line under the address. Blank = none.'],
   ['Ceremony Invite: Intro', 'You are invited to', 'Ceremony Only card: the top line.'],
   ['Ceremony Invite: Names', "Stephanie & Robert's", 'Ceremony Only card: the names, in script. Keep the " & " to get the decorative ampersand.'],
   ['Ceremony Invite: Title', 'Wedding', 'Ceremony Only card: the large word under the names.'],
@@ -504,7 +505,8 @@ function invitation_(type, settings) {
       secondName: String(setting_(settings, 'Full Invite: Second Name')),
       underNames: lines_(setting_(settings, 'Full Invite: Under Names')),
       when: shared.when,
-      where: shared.where
+      where: shared.where,
+      closing: lines_(setting_(settings, 'Full Invite: Closing Line'))
     };
   }
   return {
