@@ -45,7 +45,7 @@ window.InvitationCard = (function () {
       { key: 'where', ...SMALL, y: 1627, pitch: 55, dx: 4, growUp: true, featureFirst: VENUE },
       // e.g. "Reception to follow", under the address, in the same style and size as the
       // request lines (which are smaller in the centered layout).
-      { key: 'closing', ...SMALL, y: 1694, pitch: 48, dx: 4 },
+      { key: 'closing', ...SMALL, y: 1722, pitch: 48, dx: 4 },
     ],
     ceremony: [
       { key: 'intro', ...SMALL, fs: 61.4, ls: 0.4, y: 466, pitch: 70, dx: -2 },
