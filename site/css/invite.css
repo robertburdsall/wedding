@@ -166,6 +166,9 @@ a { color: var(--color-accent-text); }
 .event-card__address { margin: 0.1rem 0 0; color: var(--color-on-dark-muted); font-size: 0.95rem; }
 .event-card__map { display: inline-block; margin-top: 0.9rem; color: var(--pink-300); font-size: 0.78rem; letter-spacing: 0.2em; text-transform: uppercase; }
 
+.registry-card { margin: 0 0 28px; padding-bottom: 24px; }
+.events--single + .registry-card { max-width: 420px; margin-inline: auto; }
+.registry-card__text { margin: 0 auto; max-width: 30ch; color: var(--color-on-dark-muted); font-size: 0.95rem; }
 .event-card__attire { margin: 0.5rem 0 0; color: var(--color-on-dark-muted); font-size: 0.95rem; }
 
 /* ---------- RSVP ---------- */
@@ -255,4 +258,11 @@ a { color: var(--color-accent-text); }
 .meal-empty p, .meal-summary__notes { color: var(--color-text-muted); margin: 1.25rem 0; }
 .meal-summary__thanks { font-family: var(--font-serif); font-size: 1.4rem; color: var(--color-heading); margin: 1.25rem 0 1rem; }
 .meal-summary .rsvp-summary__list { margin-bottom: 1.25rem; }
+.meal-summary .rsvp-summary__list li { flex-wrap: wrap; row-gap: 0.1rem; }
+.meal-summary .rsvp-summary__list li .meal-summary__email { flex-basis: 100%; text-align: left; font-size: 0.85rem; color: var(--color-text-muted); }
+.meal-email-nudge { color: var(--color-accent-text); margin: 0 0 1.25rem; }
+.meal-form__hint { color: var(--color-text-muted); font-size: 0.95rem; margin: 0 0 0.5rem; text-align: center; }
+.meal-row__email-label { flex-basis: 100%; margin: 0.3rem 0 -0.35rem; font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-text-muted); }
+.meal-row__email { flex-basis: 100%; min-height: 44px; font-family: var(--font-sans); }
+.meal-row__email.is-missing { border-color: var(--color-error); box-shadow: 0 0 0 3px #fbeaea; }
 .rsvp-summary .meal-cta { margin: 0 0 1rem; }

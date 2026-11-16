@@ -1,9 +1,9 @@
 // A small in-memory imitation of the Google Apps Script services Code.gs uses
-// (SpreadsheetApp, MailApp, LockService, ContentService, Utilities, Session, CacheService, DriveApp).
+// (SpreadsheetApp, MailApp, LockService, ContentService, Utilities, Session, CacheService, DriveApp, ScriptApp).
 // It runs the real Code.gs file unchanged inside a Node VM so it can be tested locally.
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -224,6 +224,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
 
   // DriveApp: folders and files kept in memory (drive.folders / drive.files).
   const drive = { folders: new Map(), files: new Map(), failSharing: false };
+  const triggers = [];
   const driveId = () => '1' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 8);
   function makeFile(blob, folder) {
     const file = {
@@ -238,6 +239,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
         return this;
       },
       setTrashed(v) { this.trashed = !!v; return this; },
+      moveTo(folder) { this.folder = folder.id; return this; },
       setDescription(d) { this.description = d; return this; },
     };
     drive.files.set(file.id, file);
@@ -250,6 +252,8 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
       getName() { return this.name; },
       getUrl() { return `https://drive.google.com/drive/folders/${this.id}`; },
       createFile(blob) { return makeFile(blob, this); },
+      sharing: null,
+      setSharing(access, permission) { this.sharing = { access, permission }; return this; },
     };
     drive.folders.set(folder.id, folder);
     return folder;
@@ -304,6 +308,9 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
     Utilities: {
       formatDate,
       getUuid: () => randomUUID(),
+      DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5' },
+      Charset: { UTF_8: 'utf8' },
+      computeDigest: (algorithm, text) => Array.from(createHash(algorithm).update(String(text), 'utf8').digest(), (b) => (b > 127 ? b - 256 : b)),
       // Like Apps Script: bytes are signed (-128..127).
       base64Decode: (s) => Array.from(Buffer.from(String(s), 'base64'), (b) => (b > 127 ? b - 256 : b)),
       newBlob: (bytes, contentType, name) => ({
@@ -315,8 +322,13 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
     },
     DriveApp: {
       Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE' },
-      Permission: { VIEW: 'VIEW', EDIT: 'EDIT' },
+      Permission: { VIEW: 'VIEW', EDIT: 'EDIT', NONE: 'NONE' },
       createFolder: (name) => makeFolder(name),
+      getFileById(id) {
+        const f = drive.files.get(String(id));
+        if (!f) throw new Error('No item with the given ID could be found, or you do not have permission to access it.');
+        return f;
+      },
       getFolderById(id) {
         const f = drive.folders.get(String(id));
         if (!f) throw new Error('No item with the given ID could be found, or you do not have permission to access it.');
@@ -340,6 +352,21 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
       }),
     },
     Session: { getScriptTimeZone: () => timeZone, getActiveUser: () => ({ getEmail: () => ownerEmail }) },
+    // Time-driven triggers, kept in `triggers` so tests can see what's installed.
+    ScriptApp: {
+      getProjectTriggers: () => triggers.slice(),
+      deleteTrigger(t) { const i = triggers.indexOf(t); if (i >= 0) triggers.splice(i, 1); },
+      newTrigger(handler) {
+        const spec = { handler };
+        const builder = {
+          timeBased: () => builder,
+          everyDays(n) { spec.everyDays = n; return builder; },
+          atHour(h) { spec.atHour = h; return builder; },
+          create() { const t = { ...spec, getHandlerFunction: () => handler }; triggers.push(t); return t; },
+        };
+        return builder;
+      },
+    },
   };
 
   const context = vm.createContext(env);
@@ -362,7 +389,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
     },
     set(t, prop, value) { t[prop] = value; return true; },
   });
-  return { gs, ss, mail, ui, lock, logs, cache, drive, timeZone };
+  return { gs, ss, mail, ui, lock, logs, cache, drive, triggers, timeZone };
 }
 
 /** Sets up the sheets and adds guests. Each guest is an object keyed by column header. */

@@ -108,8 +108,17 @@
   function renderSummary(justSaved, open) {
     $('#meal-thanks').textContent = justSaved ? 'Thank you! Your meals are saved.' : 'Here are your meal choices.';
     const list = $('#meal-summary-list');
+    const emails = menu.emails || {};
     list.replaceChildren(...menu.people.map((p) =>
-      h('li', {}, h('span', { class: 'rsvp-summary__event', text: p }), h('span', { text: menu.choices[p] || 'Not chosen yet' }))));
+      h('li', {}, h('span', { class: 'rsvp-summary__event', text: p }), h('span', { text: menu.choices[p] || 'Not chosen yet' }),
+        h('span', { class: 'meal-summary__email', text: emails[p] || 'No email yet' }))));
+    // The camera link goes by email, so nudge anyone who skipped it.
+    const missing = menu.people.filter((p) => !emails[p]);
+    const nudge = $('#meal-email-nudge');
+    nudge.hidden = !missing.length || !open;
+    nudge.textContent = missing.length === menu.people.length
+      ? 'Add an email for each person so we can send you your own camera for the reception.'
+      : `Add an email for ${missing.join(' and ')} so we can send them a camera for the reception.`;
     const notes = $('#meal-summary-notes');
     notes.hidden = !menu.notes;
     notes.textContent = menu.notes ? `Dietary notes: ${menu.notes}` : '';
@@ -122,6 +131,9 @@
 
   const fieldName = (i) => `meal-${i}`;
 
+  const emailField = (i) => `meal-email-${i}`;
+  const looksLikeEmail = (s) => /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(s);
+
   function buildForm() {
     const wrap = $('#meal-people');
     wrap.replaceChildren(...menu.people.map((person, i) =>
@@ -130,10 +142,16 @@
         h('div', { class: 'choice-row', role: 'radiogroup', 'aria-label': `${person}'s meal` },
           menu.options.map((opt) => h('label', { class: 'choice' },
             h('input', { type: 'radio', name: fieldName(i), value: opt, 'aria-label': `${person}: ${opt}` }),
-            h('span', { text: opt })))))));
+            h('span', { text: opt })))),
+        h('label', { class: 'meal-row__email-label', for: emailField(i), text: `${person}'s email` }),
+        h('input', {
+          class: 'input meal-row__email', id: emailField(i), type: 'email', inputmode: 'email', maxlength: '254',
+          autocomplete: i === 0 ? 'email' : 'off', placeholder: 'Email (optional)',
+        }))));
     menu.people.forEach((person, i) => {
       const saved = menu.choices[person];
       document.querySelectorAll(`input[name="${fieldName(i)}"]`).forEach((r) => { r.checked = r.value === saved; });
+      $(`#${emailField(i)}`).value = (menu.emails && menu.emails[person]) || '';
     });
     $('#meal-notes').value = menu.notes || '';
     clearError();
@@ -168,10 +186,26 @@
       missing[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
+    const emails = {};
+    let badEmail = null;
+    menu.people.forEach((person, i) => {
+      const input = $(`#${emailField(i)}`);
+      const value = input.value.replace(/\s+/g, '');
+      if (value && !looksLikeEmail(value) && !badEmail) badEmail = { person, input };
+      emails[person] = value;
+    });
+    if (badEmail) {
+      const box = $('#meal-error');
+      box.textContent = `Please check the email address for ${badEmail.person}.`;
+      box.hidden = false;
+      badEmail.input.classList.add('is-missing');
+      badEmail.input.focus();
+      return;
+    }
     const button = $('#meal-submit');
     button.disabled = true;
     button.textContent = 'Saving…';
-    window.WeddingAPI.saveMeals({ code: menu.code, choices, notes: $('#meal-notes').value })
+    window.WeddingAPI.saveMeals({ code: menu.code, choices, notes: $('#meal-notes').value, emails })
       .then((data) => {
         menu = data;
         editing = false;

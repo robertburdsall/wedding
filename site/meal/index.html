@@ -62,12 +62,14 @@
             <p class="meal-summary__thanks" id="meal-thanks"></p>
             <ul class="rsvp-summary__list" id="meal-summary-list"></ul>
             <p class="meal-summary__notes" id="meal-summary-notes" hidden></p>
+            <p class="meal-email-nudge" id="meal-email-nudge" hidden></p>
             <button type="button" class="btn btn--ghost" id="meal-edit">Change our meals</button>
             <p class="rsvp-closed" id="meal-closed" hidden></p>
           </div>
 
           <!-- The form -->
           <form class="meal-form" id="meal-form" novalidate hidden>
+            <p class="meal-form__hint">Add everyone's email too. A few days before the wedding, we'll send each of you your own camera for the reception, and afterwards, the photo album.</p>
             <div id="meal-people"></div>
             <label class="field-label" for="meal-notes">Dietary restrictions or allergies</label>
             <textarea class="input meal-form__notes" id="meal-notes" rows="3" maxlength="500" placeholder="Let us know about any allergies or dietary needs (optional)"></textarea>

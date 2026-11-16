@@ -113,6 +113,17 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
         res.writeHead(303, { Location: '/__emails' });
         return res.end(JSON.stringify(result));
       }
+      // Like the sheet's menu items, for trying the camera and album emails locally.
+      if (url.pathname === '/__send-camera-emails' && req.method === 'POST') {
+        env.gs.sendCameraEmails_(env.gs.ctx_());
+        res.writeHead(303, { Location: '/__emails' });
+        return res.end();
+      }
+      if (url.pathname === '/__publish-album' && req.method === 'POST') {
+        env.gs.publishAlbum_(env.gs.ctx_(), new Date());
+        res.writeHead(303, { Location: '/__emails' });
+        return res.end();
+      }
 
       let file = path.normalize(path.join(siteDir, decodeURIComponent(url.pathname)));
       if (!file.startsWith(siteDir)) { res.writeHead(403); return res.end('Forbidden'); }
@@ -217,7 +228,8 @@ function renderSheets(env) {
 }
 
 function renderEmails(env) {
-  const button = '<form method="post" action="/__send-invites"><button>Send all unsent invites (fake)</button></form>';
+  const button = ['/__send-invites|Send all unsent invites', '/__send-camera-emails|Email camera links', '/__publish-album|Publish the photo album']
+    .map((b) => b.split('|')).map(([action, label]) => `<form method="post" action="${action}" style="display:inline-block;margin:0 8px 12px 0"><button>${label} (fake)</button></form>`).join('');
   if (!env.mail.sent.length) return `${button}<p>No emails sent yet.</p>`;
   return button + env.mail.sent.slice().reverse().map((m) => `<div class="email"><div class="meta"><b>To:</b> ${escapeHtml(m.to)}<br><b>From:</b> ${escapeHtml(m.name || '')}<br><b>Subject:</b> ${escapeHtml(m.subject)}</div>${m.htmlBody || `<pre>${escapeHtml(m.body)}</pre>`}</div>`).join('');
 }

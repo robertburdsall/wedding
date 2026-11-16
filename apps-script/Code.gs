@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '2.0.0';
+var VERSION = '2.1.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -40,15 +40,18 @@ var COL = {
   mealsAt: 'Meals Chosen At',
   mealLink: 'Meal Link',
   mealText: 'Meal Text Message',
+  guestEmails: 'Guest Emails',
+  cameraSent: 'Camera Emails Sent',
+  albumSent: 'Album Emails Sent',
   partySize: 'Party Size',
   notes: 'Notes'
 };
 var GUEST_HEADERS = [COL.code, COL.names, COL.email, COL.type, COL.plusOne, COL.status, COL.ceremony,
   COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt, COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize,
-  COL.mealChoices, COL.dietary, COL.mealsAt, COL.mealLink, COL.mealText, COL.notes];
+  COL.mealChoices, COL.dietary, COL.mealsAt, COL.mealLink, COL.mealText, COL.guestEmails, COL.cameraSent, COL.albumSent, COL.notes];
 var AUTO_HEADERS = [COL.code, COL.status, COL.ceremony, COL.reception, COL.ceremonyDeclined, COL.receptionDeclined, COL.plusOneName, COL.plusOneStatus, COL.respondedAt,
   COL.sentAt, COL.openedAt, COL.reminderAt, COL.link, COL.text, COL.partySize,
-  COL.mealChoices, COL.dietary, COL.mealsAt, COL.mealLink, COL.mealText];
+  COL.mealChoices, COL.dietary, COL.mealsAt, COL.mealLink, COL.mealText, COL.guestEmails, COL.cameraSent, COL.albumSent];
 var GUEST_HEADER_NOTES = {
   'Code': 'Filled in automatically. Each household gets a unique code for its personal invite link.',
   'Guest Names': 'Everyone on this invitation, written the way it goes on the envelope. "Mr. & Mrs. John Smith" counts as two people (Mr. John Smith and Mrs. John Smith). Separate other people with commas: "Mr. & Mrs. John Smith, Miss Emma Smith".',
@@ -70,6 +73,9 @@ var GUEST_HEADER_NOTES = {
   'Meals Chosen At': 'Filled in automatically when the household saves its meal choices.',
   'Meal Link': 'Filled in automatically for Wedding + Reception households: their personal meal page.',
   'Meal Text Message': 'Filled in automatically: a ready-to-send text with their meal link. Change the wording on the Settings tab.',
+  'Guest Emails': 'Filled in from the meal page: each reception guest\'s email, for their personal camera link and the photo album.',
+  'Camera Emails Sent': 'Filled in automatically: addresses that have been emailed their camera link.',
+  'Album Emails Sent': 'Filled in automatically: addresses that have been emailed the photo album.',
   'Invite Sent At': 'Filled in when the invite is emailed, or when you use Wedding → Mark selected rows as invited (texted).',
   'Invite Opened At': 'Filled in automatically the first time this household taps open the envelope on their invitation (or RSVPs). Blank = not opened yet. Link previews in texts and emails do not count. Opening it yourself to test does, so clear the cell afterwards.'
 };
@@ -87,14 +93,18 @@ var PHOTO_COL = {
   fileId: 'File ID',
   width: 'Width',
   height: 'Height',
-  uploadId: 'Upload ID'
+  uploadId: 'Upload ID',
+  uploader: 'Uploader ID',
+  albumStatus: 'Album Status'
 };
 var PHOTO_HEADERS = Object.keys(PHOTO_COL).map(function (k) { return PHOTO_COL[k]; });
 var PHOTO_HEADER_NOTES = {
   'Hidden': 'Tick to take this photo off the timeline and slideshow. The file stays in your Drive folder.',
   'Taken At': 'When the photo was taken, according to the guest\'s phone. The timeline is in this order.',
   'Table': 'Which table card the guest scanned.',
-  'Photo': 'The photo in your Google Drive folder.'
+  'Photo': 'The photo in your Google Drive folder.',
+  'Uploader ID': 'Which camera the photo came from (a guest\'s personal link, or one phone). Used for the photo limit.',
+  'Album Status': '"Left out" = a Hidden photo that was moved out of the shared album folder when you published the album.'
 };
 // Phones shrink photos before uploading (see site/js/photos.js), so these are generous.
 var PHOTO_MAX_BASE64 = 14 * 1024 * 1024; // about 10 MB of JPEG
@@ -160,7 +170,13 @@ var SETTINGS_DEFAULTS = [
   ['Photo Folder', '', 'Filled in automatically: the Google Drive folder photos are saved to. You can paste the link to a different folder of yours instead.'],
   ['Photo Page Link', '', 'Filled in automatically: the link in the table QR codes.'],
   ['Photo Slideshow Link', '', 'Filled in automatically: open this on a TV or projector for a live slideshow of the photos.'],
-  ['Photo Table Cards Link', '', 'Filled in automatically: open this on a computer to print the table QR cards.']
+  ['Photo Table Cards Link', '', 'Filled in automatically: open this on a computer to print the table QR cards.'],
+  ['Photos Per Person', 20, 'How many photos each guest can share with their camera. Blank = no limit.'],
+  ['Camera Email Days Before', 3, 'How many days before the Ceremony Date to email each reception guest their personal camera link (around 9 AM). Blank = don\'t send automatically.'],
+  ['Camera Email Subject', 'Your camera for our wedding', ''],
+  ['Album Email Subject', 'Our wedding photos are here!', ''],
+  ['Photo Album Published', '', 'Filled in when you use Wedding \u2192 Publish the photo album. Photo sharing is closed while this is filled in.'],
+  ['Photos Left Out Folder', '', 'Filled in automatically: where Hidden photos go when you publish the album, so they aren\'t in the shared download.']
 ];
 
 /* =====================================================================
@@ -240,7 +256,7 @@ function handleGet_(c, params, now) {
   if (action === 'photos') {
     var photoSettings = readSettings_(c);
     checkPhotoCode_(photoSettings, params.t || params.code, now);
-    return photosPayload_(c, photoSettings, now);
+    return photosPayload_(c, photoSettings, now, params);
   }
   if (action !== 'invite' && action !== 'opened' && action !== 'meal') fail_('bad_request', 'Unknown action.');
 
@@ -318,7 +334,10 @@ function guestFromRow_(row, cols, rowNumber) {
     dietary: String(get('dietary')).trim(),
     mealsAt: get('mealsAt'),
     mealLink: String(get('mealLink')).trim(),
-    mealText: String(get('mealText'))
+    mealText: String(get('mealText')),
+    guestEmailsRaw: String(get('guestEmails')).trim(),
+    cameraSentRaw: String(get('cameraSent')).trim(),
+    albumSentRaw: String(get('albumSent')).trim()
   };
 }
 
@@ -806,6 +825,7 @@ function mealPayload_(g, settings, now) {
     choices: choices,
     complete: g.reception.length > 0 && chosen.length === g.reception.length,
     notes: g.dietary,
+    emails: (function () { var o = {}; receptionEmails_(g).forEach(function (e) { o[e.name] = e.email; }); return o; })(),
     deadline: deadlineInfo_(settings, 'Meal Deadline', now)
   };
 }
@@ -813,10 +833,11 @@ function mealPayload_(g, settings, now) {
 function submitMeals_(c, body, now) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  var result, settings, g;
   try {
-    var settings = readSettings_(c);
+    settings = readSettings_(c);
     var table = readGuests_(c);
-    var g = lookupGuest_(table, body.code, now);
+    g = lookupGuest_(table, body.code, now);
     if (g.type !== 'full') fail_('not_reception', 'This dinner menu is only for guests invited to the reception.');
     var info = deadlineInfo_(settings, 'Meal Deadline', now);
     if (!info.open) fail_('closed', 'Meal choices closed on ' + info.deadlineText + '. Please contact Stephanie or Robert directly.');
@@ -840,17 +861,27 @@ function submitMeals_(c, body, now) {
     if (body.notes !== undefined && body.notes !== null && typeof body.notes !== 'string') fail_('bad_request', 'Invalid dietary notes.');
     var notes = String(body.notes || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
 
+    var emails = formatPairs_(mergeEmails_(g, body.emails));
+
     var list = g.reception.map(function (p) { return { name: p, meal: picked[p] }; });
     g.mealChoicesRaw = formatMeals_(list);
     g.dietary = notes;
     g.mealsAt = now;
-    writeRow_(table, g.row, { mealChoices: g.mealChoicesRaw, dietary: notes, mealsAt: now });
+    g.guestEmailsRaw = emails;
+    writeRow_(table, g.row, { mealChoices: g.mealChoicesRaw, dietary: notes, mealsAt: now, guestEmails: emails });
     logMeals_(c, now, g, body);
     SpreadsheetApp.flush();
-    return mealPayload_(g, settings, now);
+    result = mealPayload_(g, settings, now);
   } finally {
     lock.releaseLock();
   }
+  // Someone adding their email after the camera links went out gets theirs right away.
+  try {
+    if (cameraEmailDue_(settings, now)) sendCameraEmails_(c, [g.row]);
+  } catch (err) {
+    console.error('Camera email failed: ' + (err && err.message ? err.message : err));
+  }
+  return result;
 }
 
 function logMeals_(c, now, g, body) {
@@ -962,7 +993,9 @@ function readPhotos_(c) {
       table: String(get(row, 'table')).trim(),
       hidden: isTicked_(get(row, 'hidden')),
       width: Number(get(row, 'width')) || 0,
-      height: Number(get(row, 'height')) || 0
+      height: Number(get(row, 'height')) || 0,
+      uploader: String(get(row, 'uploader')).trim(),
+      albumStatus: String(get(row, 'albumStatus')).trim()
     };
   });
 }
@@ -978,15 +1011,25 @@ function publicPhoto_(p) {
 
 var DRIVE_ID_ = /^[A-Za-z0-9_-]{10,200}$/;
 
-function photosPayload_(c, settings, now) {
+function photosPayload_(c, settings, now, params) {
+  params = params || {};
   var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
-  var photos = readPhotos_(c)
+  var published = albumPublished_(settings);
+  var all = readPhotos_(c);
+  var photos = all
     .filter(function (p) { return !p.hidden && DRIVE_ID_.test(p.id); })
     .map(publicPhoto_)
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : (a.uploadedAt < b.uploadedAt ? -1 : 1); });
+  var person = params.me ? cameraPerson_(c, params.me, now) : null;
+  var you = photoAllowance_(all, person ? person.id : deviceId_(params.device), settings);
+  you.name = person ? person.name : '';
+  var album = { published: published };
+  if (published) album.url = folderUrl_(setting_(settings, 'Photo Folder'));
   return {
     photos: photos,
-    uploads: { open: uploads.open, until: uploads.deadline, untilText: uploads.deadlineText }
+    uploads: { open: uploads.open && !published, until: uploads.deadline, untilText: uploads.deadlineText },
+    you: you,
+    album: album
   };
 }
 
@@ -1041,6 +1084,7 @@ function submitPhoto_(c, body, now) {
   checkPhotoCode_(settings, body.code, now);
   var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
   if (!uploads.open) fail_('closed', 'Photo sharing closed on ' + uploads.deadlineText + '. Thank you for all the photos!');
+  if (albumPublished_(settings)) fail_('closed', 'The photo album is finished. Thank you for all the photos!');
 
   var data = typeof body.data === 'string' ? body.data.replace(/^data:image\/jpeg;base64,/, '') : '';
   if (!data) fail_('bad_request', 'Missing photo.');
@@ -1055,8 +1099,18 @@ function submitPhoto_(c, body, now) {
   var dup = already();
   if (dup) return { photo: publicPhoto_(dup), duplicate: true };
 
+  // Each guest's camera (or each phone, for table-card scans) has a limited number of shots.
+  var person = body.me ? cameraPerson_(c, body.me, now) : null;
+  var uploader = person ? person.id : deviceId_(body.device);
+  function allowance() { return photoAllowance_(readPhotos_(c), uploader, settings); }
+  function checkLimit() {
+    var a = allowance();
+    if (a.limit && uploader && a.left <= 0) fail_('limit_reached', 'You\'ve shared all ' + a.limit + ' of your photos. Thank you!');
+  }
+  checkLimit();
+
   var takenAt = photoTime_(body.takenAt, now);
-  var from = cleanText_(body.from, 60);
+  var from = cleanText_(body.from, 60) || (person ? person.name : '');
   var caption = cleanText_(body.caption, 200);
   var table = cleanTable_(body.table);
   var width = photoDimension_(body.width);
@@ -1082,6 +1136,12 @@ function submitPhoto_(c, body, now) {
       file.setTrashed(true);
       return { photo: publicPhoto_(again), duplicate: true };
     }
+    try {
+      checkLimit();
+    } catch (err) {
+      file.setTrashed(true);
+      throw err;
+    }
     var sh = photoSheet_(c);
     var info = photoCols_(sh);
     var row = [];
@@ -1089,16 +1149,321 @@ function submitPhoto_(c, body, now) {
     var values = {
       uploadedAt: now, takenAt: takenAt, from: safeText_(from), caption: safeText_(caption), table: safeText_(table),
       hidden: false, preview: DRIVE_ID_.test(id) ? '=IMAGE("https://drive.google.com/thumbnail?id=' + id + '&sz=w200")' : '',
-      link: file.getUrl(), fileId: id, width: width, height: height, uploadId: uploadId
+      link: file.getUrl(), fileId: id, width: width, height: height, uploadId: uploadId, uploader: uploader
     };
     Object.keys(values).forEach(function (key) { if (info.cols[key] >= 0) row[info.cols[key]] = values[key]; });
     sh.appendRow(row);
     SpreadsheetApp.flush();
+    var you = allowance();
+    you.name = person ? person.name : '';
     return {
       photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0 }),
-      duplicate: false
+      duplicate: false,
+      you: you
     };
   });
+}
+
+/* =====================================================================
+ * Reception guests' email addresses (typed on the meal page), their personal
+ * camera links, the emails that send them, and publishing the photo album.
+ * ===================================================================== */
+
+// "Name: value; Name: value" <-> [{ name, value }]
+function parsePairs_(raw) {
+  var out = [];
+  String(raw || '').split(';').forEach(function (part) {
+    var i = part.lastIndexOf(':');
+    if (i < 0) return;
+    var name = part.slice(0, i).trim();
+    var value = part.slice(i + 1).trim();
+    if (name && value) out.push({ name: name, value: value });
+  });
+  return out;
+}
+
+function formatPairs_(list) {
+  return list.map(function (p) { return p.name + ': ' + p.value; }).join('; ');
+}
+
+function cleanEmail_(v) {
+  return String(v === null || v === undefined ? '' : v).replace(/\s+/g, '').toLowerCase().slice(0, 254);
+}
+
+// The saved email of each person coming to the reception, in RSVP order.
+function receptionEmails_(g) {
+  var saved = parsePairs_(g.guestEmailsRaw);
+  var out = [];
+  g.reception.forEach(function (person) {
+    var m = saved.filter(function (s) { return sameName_(s.name, person); })[0];
+    if (m && isEmail_(m.value)) out.push({ name: person, email: m.value });
+  });
+  return out;
+}
+
+// People who share an address get one email between them.
+function groupByEmail_(list) {
+  var groups = [];
+  list.forEach(function (e) {
+    var group = groups.filter(function (x) { return x.email === e.email; })[0];
+    if (group) group.names.push(e.name);
+    else groups.push({ email: e.email, names: [e.name] });
+  });
+  return groups;
+}
+
+// Emails typed on the meal page, merged into what's saved. Returns the new list (RSVP order).
+function mergeEmails_(g, given) {
+  if (given === undefined || given === null) given = {};
+  if (typeof given !== 'object' || Array.isArray(given)) fail_('bad_request', 'Invalid email addresses.');
+  var emails = parsePairs_(g.guestEmailsRaw);
+  Object.keys(given).forEach(function (name) {
+    var person = g.reception.filter(function (p) { return sameName_(p, name); })[0];
+    if (!person) return; // not coming to the reception: nothing to save
+    var email = cleanEmail_(given[name]);
+    if (email && !isEmail_(email)) fail_('bad_email', 'Please check the email address for ' + person + '.');
+    emails = emails.filter(function (e) { return !sameName_(e.name, person); });
+    if (email) emails.push({ name: person, value: email });
+  });
+  return g.reception.map(function (p) {
+    return emails.filter(function (e) { return sameName_(e.name, p); })[0];
+  }).filter(function (e) { return e; });
+}
+
+// A short key for one person, so their camera link can count their photos.
+function personKey_(code, name) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+    code + '|' + String(name).toLowerCase().replace(/\s+/g, ' ').trim(), Utilities.Charset.UTF_8);
+  var key = '';
+  for (var i = 0; i < 6; i++) key += CODE_ALPHABET.charAt(((bytes[i] % 256) + 256) % 256 % CODE_ALPHABET.length);
+  return key;
+}
+
+// The photo page, or one person's own camera on it.
+function cameraLink_(settings, code, name) {
+  var base = String(setting_(settings, 'Site URL')).replace(/\/+$/, '');
+  var link = base + '/photos/?t=' + photoCode_(settings);
+  return code && name ? link + '&me=' + code + '-' + personKey_(code, name) : link;
+}
+
+// Who a personal camera link belongs to: { id, name }, or null. Only reception guests have one.
+function cameraPerson_(c, me, now) {
+  var m = String(me || '').toUpperCase().match(/^([A-Z0-9]{8})-?([A-Z0-9]{6})$/);
+  if (!m) return null;
+  var g = readGuests_(c).guests.filter(function (x) { return x.code === m[1]; })[0];
+  if (!g) { codeGuard_(now).miss(); return null; }
+  var person = g.reception.filter(function (p) { return personKey_(g.code, p) === m[2]; })[0];
+  return person ? { id: 'p:' + g.code + '-' + m[2], name: person } : null;
+}
+
+// Guests without a personal link (scanning a table card) are counted per phone.
+function deviceId_(v) {
+  var s = String(v === null || v === undefined ? '' : v);
+  return /^[A-Za-z0-9-]{8,64}$/.test(s) ? 'd:' + s : '';
+}
+
+function photoLimit_(settings) {
+  var n = Math.floor(Number(setting_(settings, 'Photos Per Person')));
+  return n > 0 ? n : 0;
+}
+
+function photoAllowance_(photos, uploader, settings) {
+  var limit = photoLimit_(settings);
+  var used = uploader ? photos.filter(function (p) { return p.uploader === uploader; }).length : 0;
+  return { limit: limit || null, used: used, left: limit ? Math.max(0, limit - used) : null };
+}
+
+// True from "Camera Email Days Before" the Ceremony Date through the wedding day.
+function cameraEmailDue_(settings, now) {
+  var wedding = dateKey_(settings['Ceremony Date']);
+  var raw = setting_(settings, 'Camera Email Days Before');
+  var days = Number(raw);
+  if (!wedding || raw === '' || !(days >= 0)) return false;
+  var p = wedding.split('-').map(Number);
+  var tz = Session.getScriptTimeZone();
+  var start = Utilities.formatDate(new Date(p[0], p[1] - 1, p[2] - Math.floor(days), 12), tz, 'yyyy-MM-dd');
+  var today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  return today >= start && today <= wedding;
+}
+
+function sendMail_(to, mail, settings) {
+  var opts = { to: to, subject: mail.subject, htmlBody: mail.html, body: mail.text, name: setting_(settings, 'Sender Name') };
+  var replyTo = setting_(settings, 'Reply-To Email');
+  if (replyTo) opts.replyTo = replyTo;
+  MailApp.sendEmail(opts);
+}
+
+var SIGNATURE_HTML_ = '<p style="margin:0;">With love,<br><span style="font-style:italic;font-size:22px;color:#15322a;">Stephanie &amp; Robert</span></p>';
+
+// people: [{ name, link }]
+function buildCameraEmail_(people, settings) {
+  var limit = photoLimit_(settings);
+  var names = people.map(function (p) { return p.name; });
+  var several = people.length > 1;
+  var intro = (several ? 'Each of you has your own camera for the reception' : 'Here is your own camera for the reception') +
+    (limit ? ': take up to ' + limit + ' photos' + (several ? ' each' : '') : '') +
+    ', and see everyone else\'s photos as they come in. Just open it on your phone. No app needed.';
+  var buttons = people.map(function (p) {
+    return emailButton_(p.link, several ? 'OPEN ' + firstNames_([p.name]).toUpperCase() + '\'S CAMERA' : 'OPEN YOUR CAMERA');
+  }).join('');
+  var html = emailShell_(
+    '<p style="margin:0 0 16px;">Hi ' + escapeHtml_(firstNames_(names)) + '!</p>' +
+    '<p style="margin:0 0 16px;">Our wedding is almost here, and we\'d love to see the celebration through your eyes. ' + escapeHtml_(intro) + '</p>' +
+    buttons +
+    '<p style="margin:0 0 16px;">Keep this email handy so you can find your camera at the reception. Please save your photos for the reception, not the ceremony.</p>' +
+    '<p style="margin:0 0 16px;">After the wedding, we\'ll gather everyone\'s photos into an album and send it to you.</p>' +
+    SIGNATURE_HTML_, settings);
+  var text = 'Hi ' + firstNames_(names) + '!\n\nOur wedding is almost here, and we\'d love to see the celebration through your eyes. ' + intro + '\n\n' +
+    people.map(function (p) { return (several ? p.name + ': ' : 'Your camera: ') + p.link; }).join('\n') +
+    '\n\nPlease save your photos for the reception, not the ceremony. After the wedding, we\'ll send you an album of everyone\'s photos.\n\nWith love,\nStephanie & Robert';
+  return { subject: setting_(settings, 'Camera Email Subject') || 'Your camera for our wedding', html: html, text: text };
+}
+
+function buildAlbumEmail_(names, settings) {
+  var album = cameraLink_(settings);
+  var download = folderUrl_(setting_(settings, 'Photo Folder'));
+  var html = emailShell_(
+    '<p style="margin:0 0 16px;">Hi ' + escapeHtml_(firstNames_(names)) + '!</p>' +
+    '<p style="margin:0 0 16px;">Thank you for celebrating with us. We\'ve gathered everyone\'s photos from the reception into one album, and we love seeing the night through your eyes.</p>' +
+    emailButton_(album, 'SEE THE ALBUM') +
+    (download ? '<p style="margin:0 0 16px;text-align:center;font-size:15px;"><a href="' + escapeHtml_(download) + '" style="color:#b46a79;">Download all the photos</a></p>' : '') +
+    SIGNATURE_HTML_, settings);
+  var text = 'Hi ' + firstNames_(names) + '!\n\nThank you for celebrating with us. Here are everyone\'s photos from the reception:\n' + album +
+    (download ? '\n\nDownload all the photos: ' + download : '') + '\n\nWith love,\nStephanie & Robert';
+  return { subject: setting_(settings, 'Album Email Subject') || 'Our wedding photos are here!', html: html, text: text };
+}
+
+// Emails each reception guest who has an address (and hasn't had this email yet). `column` is
+// 'cameraSent' or 'albumSent'. Stops when the daily email limit runs out; the rest go next time.
+function sendGuestEmails_(c, column, build, onlyRows) {
+  var table = readGuests_(c);
+  if (table.cols[column] < 0) fail_('setup', 'Use Wedding → Set up sheets first, to add the "' + COL[column] + '" column.');
+  var settings = readSettings_(c);
+  var result = { emails: 0, people: 0, quotaHit: false };
+  table.guests.forEach(function (g) {
+    if (result.quotaHit || !g.code || g.type !== 'full' || (onlyRows && onlyRows.indexOf(g.row) < 0)) return;
+    var sent = splitEmails_(g[column + 'Raw']).map(cleanEmail_);
+    groupByEmail_(receptionEmails_(g)).forEach(function (group) {
+      if (result.quotaHit || sent.indexOf(group.email) >= 0) return;
+      if (MailApp.getRemainingDailyQuota() < 1) { result.quotaHit = true; return; }
+      try {
+        sendMail_(group.email, build(g, group.names, settings), settings);
+      } catch (err) {
+        if (/too many times/i.test(String(err && err.message))) { result.quotaHit = true; return; }
+        throw err;
+      }
+      sent.push(group.email);
+      var values = {};
+      values[column] = sent.join(', ');
+      writeRow_(table, g.row, values);
+      g[column + 'Raw'] = values[column];
+      result.emails++;
+      result.people += group.names.length;
+    });
+  });
+  return result;
+}
+
+function sendCameraEmails_(c, onlyRows) {
+  var settings = readSettings_(c);
+  if (!photoCode_(settings)) ensurePhotoSettings_(c, settings);
+  return sendGuestEmails_(c, 'cameraSent', function (g, names, s) {
+    return buildCameraEmail_(names.map(function (n) { return { name: n, link: cameraLink_(s, g.code, n) }; }), s);
+  }, onlyRows);
+}
+
+function sendAlbumEmails_(c) {
+  return sendGuestEmails_(c, 'albumSent', function (g, names, s) { return buildAlbumEmail_(names, s); });
+}
+
+function albumPublished_(settings) {
+  var v = settings['Photo Album Published'];
+  return v instanceof Date || String(v === null || v === undefined ? '' : v).trim() !== '';
+}
+
+function folderUrl_(raw) {
+  raw = String(raw || '').trim();
+  if (/^https:\/\//.test(raw)) return raw;
+  return /^[A-Za-z0-9_-]{10,}$/.test(raw) ? 'https://drive.google.com/drive/folders/' + raw : '';
+}
+
+var ALBUM_LEFT_OUT = 'Left out';
+
+// Where Hidden photos go when the album is published, so they aren't in the shared download.
+function leftOutFolderId_(c, settings, folder) {
+  var raw = setting_(settings, 'Photos Left Out Folder');
+  var m = raw.match(/folders\/([A-Za-z0-9_-]+)/) || raw.match(/^([A-Za-z0-9_-]{10,})$/);
+  if (m) {
+    try { return DriveApp.getFolderById(m[1]).getId(); } catch (err) { /* make a new one */ }
+  }
+  var f = DriveApp.createFolder(folder.getName() + ' (left out of the album)');
+  writeSetting_(c, 'Photos Left Out Folder', f.getUrl());
+  settings['Photos Left Out Folder'] = f.getUrl();
+  return f.getId();
+}
+
+// Takes Hidden photos out of the album folder (and puts back ones un-hidden since), shares the
+// folder so everyone can download it, closes photo sharing, and emails the album.
+function publishAlbum_(c, now) {
+  var settings = readSettings_(c);
+  var folder = DriveApp.getFolderById(withLock_(function () { return photoFolderId_(c, settings); }));
+  var leftOut = null;
+  var result = { leftOut: 0, restored: 0 };
+  var sh = sheet_(c, 'photos');
+  if (sh && sh.getLastRow() > 1) {
+    var cols = photoCols_(sh).cols;
+    readPhotos_(c).forEach(function (p, i) {
+      if (!DRIVE_ID_.test(p.id)) return;
+      var isOut = p.albumStatus === ALBUM_LEFT_OUT;
+      if (p.hidden === isOut) return;
+      var file = DriveApp.getFileById(p.id);
+      if (p.hidden) {
+        if (!leftOut) leftOut = DriveApp.getFolderById(leftOutFolderId_(c, settings, folder));
+        file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+        file.moveTo(leftOut);
+        result.leftOut++;
+      } else {
+        file.moveTo(folder);
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        result.restored++;
+      }
+      if (cols.albumStatus >= 0) sh.getRange(i + 2, cols.albumStatus + 1).setValue(p.hidden ? ALBUM_LEFT_OUT : '');
+    });
+  }
+  folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  if (!albumPublished_(settings)) {
+    var stamp = Utilities.formatDate(now, Session.getScriptTimeZone(), 'MMMM d, yyyy h:mm a');
+    writeSetting_(c, 'Photo Album Published', stamp);
+  }
+  SpreadsheetApp.flush();
+  result.url = folder.getUrl();
+  result.mail = sendAlbumEmails_(c);
+  return result;
+}
+
+// Runs every morning (installed by Set up sheets): sends camera links when it's time, and
+// finishes any album emails the daily email limit held back.
+function dailyTasks() {
+  var c = ctx_();
+  var now = new Date();
+  var settings = readSettings_(c);
+  try {
+    if (cameraEmailDue_(settings, now)) sendCameraEmails_(c);
+  } catch (err) {
+    console.error('Camera emails failed: ' + (err && err.message ? err.message : err));
+  }
+  try {
+    if (albumPublished_(settings)) sendAlbumEmails_(c);
+  } catch (err) {
+    console.error('Album emails failed: ' + (err && err.message ? err.message : err));
+  }
+}
+
+function ensureDailyTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'dailyTasks') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('dailyTasks').timeBased().everyDays(1).atHour(9).create();
 }
 
 function writeRow_(table, rowNumber, values) {
@@ -1491,7 +1856,7 @@ function setupSheets_(c) {
       cell.setBackground('#4f7f6c');
       guests.getRange(2, col, maxRows - 1, 1).setBackground('#f4f6f5');
     }
-    var widths = { 'Guest Names': 260, 'Email': 220, 'Invite Type': 160, 'Ceremony Attending': 220, 'Reception Attending': 220, 'Ceremony Declined': 200, 'Reception Declined': 200, 'Plus One Status': 170, 'Invite Link': 280, 'Text Message': 420, 'Meal Choices': 360, 'Dietary Notes': 260, 'Meal Link': 280, 'Meal Text Message': 380, 'Notes': 220 };
+    var widths = { 'Guest Names': 260, 'Email': 220, 'Invite Type': 160, 'Ceremony Attending': 220, 'Reception Attending': 220, 'Ceremony Declined': 200, 'Reception Declined': 200, 'Plus One Status': 170, 'Invite Link': 280, 'Text Message': 420, 'Meal Choices': 360, 'Dietary Notes': 260, 'Meal Link': 280, 'Meal Text Message': 380, 'Guest Emails': 320, 'Camera Emails Sent': 220, 'Album Emails Sent': 220, 'Notes': 220 };
     guests.setColumnWidth(col, widths[h] || 130);
   });
   var typeCol = header.indexOf(COL.type) + 1;
@@ -1587,6 +1952,13 @@ function setupSheets_(c) {
   rows.push(['', '']);
   rows.push(['Photos shared', '=COUNTA(' + photoCol('fileId') + ')']);
   rows.push(['Photos hidden', '=COUNTIF(' + photoCol('hidden') + ',TRUE)']);
+  function entries(name, sep) {
+    var r = col(name);
+    return '=SUMPRODUCT((LEN(TRIM(' + r + '))>0)*(LEN(' + r + ')-LEN(SUBSTITUTE(' + r + ',"' + sep + '",""))+1))';
+  }
+  rows.push(['Reception guests with an email address', entries(COL.guestEmails, ';')]);
+  rows.push(['Camera links emailed (addresses)', entries(COL.cameraSent, ',')]);
+  rows.push(['Album emailed (addresses)', entries(COL.albumSent, ',')]);
   summary.getRange(1, 1, rows.length, 2).setValues(rows);
   summary.getRange(1, 1).setFontSize(18).setFontWeight('bold').setFontColor('#15322a');
   summary.getRange(14, 1, 4, 2).setFontWeight('bold').setBackground('#f9e9eb');
@@ -1640,6 +2012,9 @@ function onOpen() {
     .addItem('Update codes, links & text messages', 'menuGenerateCodes')
     .addItem('Check guest list for problems', 'menuCheckGuestList')
     .addItem('Show photo sharing links', 'menuPhotoLinks')
+    .addItem('Email camera links now', 'menuSendCameraEmails')
+    .addItem('Email a test camera link to myself', 'menuSendTestCameraEmail')
+    .addItem('Publish the photo album (and email it)', 'menuPublishAlbum')
     .addSeparator()
     .addItem('Mark selected rows as invited (texted)', 'menuMarkTexted')
     .addSeparator()
@@ -1675,6 +2050,7 @@ function menuSetup() {
   setupSheets_(ctx_());
   generateCodes_(ctx_());
   photoFolderId_(ctx_(), readSettings_(ctx_())); // makes the Drive folder now, so photo sharing is ready
+  ensureDailyTrigger_(); // sends camera links "Camera Email Days Before" the wedding
   ui_().alert('All set! Add guests on the "Guests" tab, then fill in the "Settings" tab.');
 }
 
@@ -1689,6 +2065,43 @@ function menuPhotoLinks() {
     'Photo page (what the QR codes open):\n' + setting_(settings, 'Photo Page Link') + '\n\n' +
     'Photos are saved to:\n' + setting_(settings, 'Photo Folder') + '\n\n' +
     'These are also on the Settings tab.');
+}
+
+function menuSendCameraEmails() {
+  var c = ctx_();
+  var answer = ui_().alert('Email camera links now?\n\nEvery reception guest with an email address who hasn\'t had theirs yet gets their personal camera link. (This also happens automatically "Camera Email Days Before" the wedding.)', ui_().ButtonSet.OK_CANCEL);
+  if (answer !== ui_().Button.OK) return;
+  var r = sendCameraEmails_(c);
+  ui_().alert('Sent ' + r.emails + ' email' + (r.emails === 1 ? '' : 's') + ' (' + r.people + ' guest' + (r.people === 1 ? '' : 's') + ').' +
+    (r.quotaHit ? '\n\nYou reached the daily email limit. The rest go out automatically tomorrow morning.' : ''));
+}
+
+function menuSendTestCameraEmail() {
+  var c = ctx_();
+  var me = Session.getActiveUser().getEmail();
+  if (!me) { ui_().alert("Couldn't find your email address."); return; }
+  var settings = readSettings_(c);
+  ensurePhotoSettings_(c, settings);
+  var mail = buildCameraEmail_([{ name: 'Test Guest', link: cameraLink_(settings) }], settings);
+  mail.subject = '[TEST] ' + mail.subject;
+  sendMail_(me, mail, settings);
+  ui_().alert('Sent a test camera email to ' + me + '. (Its link is the shared photo page, not a guest\'s personal camera.)');
+}
+
+function menuPublishAlbum() {
+  var c = ctx_();
+  var hidden = readPhotos_(c).filter(function (p) { return p.hidden; }).length;
+  var answer = ui_().alert('Publish the photo album?\n\n' +
+    'Photos ticked Hidden (' + hidden + ') are left out. Photo sharing closes, the album folder can be downloaded by anyone with the link, ' +
+    'and every reception guest with an email address gets the album.\n\n' +
+    'You can run this again after hiding more photos. No one gets the email twice.', ui_().ButtonSet.OK_CANCEL);
+  if (answer !== ui_().Button.OK) return;
+  var r = publishAlbum_(c, new Date());
+  ui_().alert('The album is published.\n\n' +
+    (r.leftOut ? 'Left out: ' + r.leftOut + ' photo' + (r.leftOut === 1 ? '' : 's') + '\n' : '') +
+    'Album emails sent: ' + r.mail.emails +
+    (r.mail.quotaHit ? '\n\nYou reached the daily email limit. The rest go out automatically tomorrow morning.' : '') +
+    '\n\nAlbum folder: ' + r.url);
 }
 
 function menuGenerateCodes() {

@@ -5,7 +5,7 @@ window.WEDDING_CONFIG = {
 
   // Registry (shown on the main page). Leave blank until it's ready.
   // registryUrl: the link to your registry page, e.g. 'https://www.zola.com/registry/yournames'
-  registryUrl: '',
+  registryUrl: 'https://www.zola.com/registry/robertandstephanieregistry',
   // registryEmbedUrl: only if your registry site gives you an "embed" or "widget" page link to
   // show the registry right on this site. Otherwise leave it blank and guests get a button.
   registryEmbedUrl: '',

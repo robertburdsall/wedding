@@ -127,6 +127,9 @@ describe('website ↔ Apps Script over HTTP', () => {
     assert.equal(res.photo.from, 'Test Guest');
     const list = await api.getPhotos(t);
     assert.ok(list.photos.some((p) => p.id === res.photo.id));
+    // Each phone's photo count comes back with the list.
+    await api.uploadPhoto({ code: t, data: jpeg, device: 'e2e-phone-1', uploadId: 'e2e-2' });
+    assert.deepEqual((await api.getPhotos(t, { device: 'e2e-phone-1' })).you, { limit: 20, used: 1, left: 19, name: '' });
     await assert.rejects(api.getPhotos('WRONGCODE'), (err) => err.code === 'not_found');
     // The dev server serves the "Drive" file so the pages can be previewed locally.
     const img = await fetch(`${dev.siteUrl}/__drive/${res.photo.id}?sz=w600`);

@@ -173,6 +173,10 @@ Only people with the **Photo Code**, which is printed on the table cards and fou
 | Photo Code | The secret code on the cards. Filled in automatically. |
 | Photo Uploads Until | Last day guests can add photos, for example two weeks after the wedding. Blank = no end. The timeline stays viewable after that. |
 | Photo Folder | Filled in automatically. Paste a link to a different Drive folder of yours if you'd rather use your own. |
+| Photos Per Person | How many photos each camera can share (20). Blank = no limit. |
+| Camera Email Days Before | When to email reception guests their camera links: this many days before the Ceremony Date (3). Blank = only when you use the menu. |
+| Camera Email Subject, Album Email Subject | The subject lines of those emails. |
+| Photo Album Published, Photos Left Out Folder | Filled in when you publish the album. |
 | Photo Page Link, Photo Slideshow Link, Photo Table Cards Link | Filled in automatically. Also shown by **💌 Wedding → Show photo sharing links**. |
 
 **Before the wedding**
@@ -180,6 +184,22 @@ Only people with the **Photo Code**, which is printed on the table cards and fou
 1. Open the **Photo Table Cards Link** on a computer. Set the number of tables and print (two 5×7 cards per letter page, landscape). Cut along the dashed lines.
 2. Test it: scan a card with your phone, share a couple of photos, and check they show on the timeline and on the Photos tab. Then tick **Hidden** on the test photos.
 3. If you'll have a screen at the reception, open the **Photo Slideshow Link** on the laptop connected to it and click once for full screen. It runs on its own, keeps the screen awake, and shows a QR code in the corner.
+
+### Personal cameras for reception guests
+
+- **Emails come from the meal page.** Each person picking a dinner can add their email. Addresses fill in the **Guest Emails** column ("Name: email; …"). They're optional, and the meal page nudges anyone who left one out.
+- **Each reception guest gets their own camera link** (`…/photos/?t=CODE&me=…`). It greets them by name, puts their name on their photos, and counts their shots against **Photos Per Person** (20). Opening it once also makes the table QR code open the same camera on that phone. Someone who only scans a table card gets their own 20, counted per phone.
+- **The links are emailed automatically** **Camera Email Days Before** (3) the **Ceremony Date**, around 9 AM. One email goes to each address, so a couple sharing an address gets one email with a button for each of them. Anyone who adds their email after that day gets theirs right away, and no one gets it twice. Sent addresses are listed in **Camera Emails Sent**.
+- To check how it looks, use **💌 Wedding → Email a test camera link to myself**. To send early, use **💌 Wedding → Email camera links now**.
+- Ceremony-only guests don't get a camera.
+
+### After the wedding: publish the album
+
+1. On the Photos tab, tick **Hidden** on anything you don't want in the album.
+2. Choose **💌 Wedding → Publish the photo album (and email it)**. Hidden photos move to a separate private "(left out of the album)" folder. The photo folder becomes downloadable by anyone with its link, photo sharing closes, and the photo page becomes the finished album with a **Download all photos** button.
+3. Every reception guest with an email gets the album by email, once. If the daily email limit runs out, the rest go out automatically the next morning.
+
+Hid something else later? Tick it and publish again: it's taken out of the folder, and no one is emailed twice. To reopen photo sharing, clear **Photo Album Published** on Settings.
 
 ## Updating the script later
 
@@ -190,7 +210,7 @@ Whenever a new version of `apps-script/Code.gs` comes along:
 3. **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The web app URL stays the same.
 4. Check it's live: open your web app URL with `?action=ping` on the end (for example `https://script.google.com/macros/s/…/exec?action=ping`). It should show the `VERSION` from the top of the new `Code.gs`. If it shows an older number, step 3 didn't take, so try it again.
 
-If [`apps-script/appsscript.json`](apps-script/appsscript.json) changed too (version 2.0.0 added Google Drive access for photo sharing), replace that file in the editor as well before step 2. **Set up sheets** then asks you to authorize again. Google warns that the script can see your Drive files: it only ever uses its own photo folder.
+If [`apps-script/appsscript.json`](apps-script/appsscript.json) changed too, replace that file in the editor as well before step 2. **Set up sheets** then asks you to authorize again. Version 2.0.0 added Google Drive access for photo sharing: Google warns that the script can see your Drive files, but it only ever uses its own photo folder. Version 2.1.0 added permission to run on a schedule, which sends the camera emails 3 days before the wedding. **Set up sheets** installs that daily schedule.
 
 ## Security notes
 

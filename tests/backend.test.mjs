@@ -46,7 +46,7 @@ describe('sheet setup', () => {
     assert.deepEqual(env.ss.getSheetByName('Guests').rows()[0], [
       'Code', 'Guest Names', 'Email', 'Invite Type', 'Plus One', 'RSVP Status', 'Ceremony Attending',
       'Reception Attending', 'Ceremony Declined', 'Reception Declined', 'Plus One Name', 'Plus One Status', 'Responded At', 'Invite Sent At', 'Invite Opened At', 'Reminder Sent At', 'Invite Link', 'Text Message', 'Party Size',
-      'Meal Choices', 'Dietary Notes', 'Meals Chosen At', 'Meal Link', 'Meal Text Message', 'Notes',
+      'Meal Choices', 'Dietary Notes', 'Meals Chosen At', 'Meal Link', 'Meal Text Message', 'Guest Emails', 'Camera Emails Sent', 'Album Emails Sent', 'Notes',
     ]);
     const settingKeys = env.ss.getSheetByName('Settings').rows().map((r) => r[0]);
     assert.equal(settingKeys[0], 'Setting');
@@ -1648,7 +1648,7 @@ describe('photo sharing', () => {
   test('setup makes a Photos tab, a secret photo code and the photo links', () => {
     const env = setup();
     assert.deepEqual(env.ss.getSheetByName('Photos').rows()[0],
-      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID']);
+      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status']);
     const s = env.gs.readSettings_(env.c);
     assert.match(s['Photo Code'], /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
     assert.equal(s['Photo Page Link'], `https://stephanieandrobert.test/photos/?t=${s['Photo Code']}`);
@@ -1877,6 +1877,250 @@ describe('photo sharing', () => {
     env.gs.menuSetup();
     env.gs.menuSetup();
     assert.equal(env.drive.folders.size, 1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+describe('reception guests: emails, personal cameras and the album', () => {
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake photo bytes')]).toString('base64');
+  const photoCode = (env) => env.gs.readSettings_(env.c)['Photo Code'];
+  const upload = (env, extra = {}) => apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, ...extra });
+  const list = (env, extra = {}) => apiGet(env, { action: 'photos', t: photoCode(env), ...extra });
+  const saveMeals = (env, i, choices, emails, extra = {}) => apiPost(env, { action: 'meal', code: env.code(i), choices, emails, ...extra });
+  const me = (env, i, name) => env.gs.cameraLink_(env.gs.readSettings_(env.c), env.code(i), name).split('me=')[1];
+  const ALL_FISH = { 'Alice Smith': 'North Atlantic Salmon', 'Bob Smith': 'Filet Mignon' };
+
+  // Alice & Bob (row 0) and Carol (row 1) come to the reception; the Browns (row 2) are ceremony only.
+  function ready(settings = {}) {
+    const env = setup({ settings: { ...SETTINGS, ...settings } });
+    rsvp(env, 0, { ceremony: ['Alice Smith', 'Bob Smith'], reception: ['Alice Smith', 'Bob Smith'] });
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: ['Carol Jones'] });
+    rsvp(env, 2, { ceremony: ['Dan Brown'] });
+    return env;
+  }
+
+  test('the meal page saves an email for each reception guest', () => {
+    const env = ready();
+    const res = saveMeals(env, 0, ALL_FISH, { 'Alice Smith': ' Alice@Example.com ', 'Bob Smith': 'bob@example.com', 'Dan Brown': 'dan@example.com' });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(env.row(0)['Guest Emails'], 'Alice Smith: alice@example.com; Bob Smith: bob@example.com');
+    assert.deepEqual(res.data.emails, { 'Alice Smith': 'alice@example.com', 'Bob Smith': 'bob@example.com' });
+    assert.deepEqual(apiGet(env, { action: 'meal', code: env.code(0) }).data.emails, res.data.emails);
+    // Clearing one removes it; leaving one out keeps it.
+    saveMeals(env, 0, ALL_FISH, { 'Bob Smith': '' });
+    assert.equal(env.row(0)['Guest Emails'], 'Alice Smith: alice@example.com');
+  });
+
+  test('emails are optional, and a typo is caught without saving anything', () => {
+    const env = ready();
+    assert.equal(saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }).ok, true);
+    assert.equal(env.row(1)['Guest Emails'], '');
+    const bad = saveMeals(env, 1, { 'Carol Jones': 'North Atlantic Salmon' }, { 'Carol Jones': 'carol@example' });
+    assert.equal(bad.error, 'bad_email');
+    assert.match(bad.message, /Carol Jones/);
+    assert.equal(env.row(1)['Meal Choices'], 'Carol Jones: Filet Mignon');
+    assert.equal(saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, ['carol@example.com']).error, 'bad_request');
+  });
+
+  test('an email typed as a formula is stored as text', () => {
+    const env = ready();
+    saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, { 'Carol Jones': '=evil@example.com' });
+    assert.equal(env.sheet.getRange(3, env.sheet.rows()[0].indexOf('Guest Emails') + 1).getFormula(), '');
+  });
+
+  test('each reception guest gets a personal camera link that knows who they are', () => {
+    const env = ready();
+    const link = env.gs.cameraLink_(env.gs.readSettings_(env.c), env.code(0), 'Alice Smith');
+    assert.match(link, new RegExp(`^https://stephanieandrobert\\.test/photos/\\?t=${photoCode(env)}&me=${env.code(0)}-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$`));
+    assert.notEqual(me(env, 0, 'Alice Smith'), me(env, 0, 'Bob Smith'));
+    const you = list(env, { me: me(env, 0, 'Alice Smith') }).data.you;
+    assert.deepEqual(you, { limit: 20, used: 0, left: 20, name: 'Alice Smith' });
+    // Made-up or ceremony-only links are just anonymous.
+    assert.equal(list(env, { me: `${env.code(0)}-ZZZZZZ` }).data.you.name, '');
+    assert.equal(list(env, { me: me(env, 2, 'Dan Brown') }).data.you.name, '');
+    assert.equal(list(env, { me: 'garbage' }).ok, true);
+  });
+
+  test('each camera can share up to "Photos Per Person" photos, hidden ones included', () => {
+    const env = ready({ 'Photos Per Person': 2 });
+    const alice = me(env, 0, 'Alice Smith');
+    assert.equal(upload(env, { me: alice }).data.you.left, 1);
+    const second = upload(env, { me: alice });
+    assert.deepEqual(second.data.you, { limit: 2, used: 2, left: 0, name: 'Alice Smith' });
+    const third = upload(env, { me: alice });
+    assert.equal(third.error, 'limit_reached');
+    assert.match(third.message, /all 2 of your photos/);
+    // Bob has his own allowance; hiding a photo doesn't give a shot back.
+    assert.equal(upload(env, { me: me(env, 0, 'Bob Smith') }).ok, true);
+    env.ss.getSheetByName('Photos').getRange(2, 6).setValue(true);
+    assert.equal(upload(env, { me: alice }).error, 'limit_reached');
+    assert.equal([...env.drive.files.values()].filter((f) => !f.trashed).length, 3);
+  });
+
+  test('table-card scans are counted per phone', () => {
+    const env = ready({ 'Photos Per Person': 1 });
+    assert.equal(upload(env, { device: 'phone-aaaaaaaa' }).ok, true);
+    assert.equal(upload(env, { device: 'phone-aaaaaaaa' }).error, 'limit_reached');
+    assert.equal(upload(env, { device: 'phone-bbbbbbbb' }).ok, true);
+    assert.deepEqual(list(env, { device: 'phone-aaaaaaaa' }).data.you, { limit: 1, used: 1, left: 0, name: '' });
+    // A blank Photos Per Person means no limit.
+    setSettings(env, { 'Photos Per Person': '' });
+    assert.equal(upload(env, { device: 'phone-aaaaaaaa' }).ok, true);
+    assert.equal(list(env).data.you.limit, null);
+  });
+
+  test("a personal camera fills in the guest's name", () => {
+    const env = ready();
+    const res = upload(env, { me: me(env, 1, 'Carol Jones') });
+    assert.equal(res.data.photo.from, 'Carol Jones');
+    assert.equal(env.ss.getSheetByName('Photos').objects()[0]['Uploader ID'], `p:${me(env, 1, 'Carol Jones')}`);
+    assert.equal(upload(env, { me: me(env, 1, 'Carol Jones'), from: 'Aunt Carol' }).data.photo.from, 'Aunt Carol');
+  });
+
+  test('camera emails are due from "Camera Email Days Before" through the wedding day', () => {
+    const env = ready();
+    const s = () => env.gs.readSettings_(env.c);
+    const due = (d) => env.gs.cameraEmailDue_(s(), d);
+    assert.equal(due(new Date(2099, 5, 2, 23, 0)), false);
+    assert.equal(due(new Date(2099, 5, 3, 9, 0)), true);
+    assert.equal(due(new Date(2099, 5, 6, 20, 0)), true);
+    assert.equal(due(new Date(2099, 5, 7, 9, 0)), false);
+    setSettings(env, { 'Camera Email Days Before': '' });
+    assert.equal(due(new Date(2099, 5, 4)), false);
+    setSettings(env, { 'Camera Email Days Before': 3, 'Ceremony Date': '' });
+    assert.equal(due(new Date(2099, 5, 4)), false);
+  });
+
+  test('camera emails go once to each address, with each person\'s own link', () => {
+    const env = ready();
+    saveMeals(env, 0, ALL_FISH, { 'Alice Smith': 'smiths@example.com', 'Bob Smith': 'smiths@example.com' });
+    saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, { 'Carol Jones': 'carol@example.com' });
+    const r = env.gs.sendCameraEmails_(env.c);
+    assert.deepEqual(r, { emails: 2, people: 3, quotaHit: false });
+    const smiths = env.mail.sent.find((m) => m.to === 'smiths@example.com');
+    assert.equal(smiths.subject, 'Your camera for our wedding');
+    assert.ok(smiths.htmlBody.includes(`me=${me(env, 0, 'Alice Smith')}`));
+    assert.ok(smiths.htmlBody.includes(`me=${me(env, 0, 'Bob Smith')}`));
+    assert.match(smiths.htmlBody, /OPEN ALICE&#39;S CAMERA/);
+    assert.match(smiths.body, /up to 20 photos each/);
+    assert.equal(env.row(0)['Camera Emails Sent'], 'smiths@example.com');
+    // Running again sends nothing new; a new address gets its own.
+    assert.equal(env.gs.sendCameraEmails_(env.c).emails, 0);
+    saveMeals(env, 0, ALL_FISH, { 'Bob Smith': 'bob@example.com' });
+    assert.equal(env.gs.sendCameraEmails_(env.c).emails, 1);
+    assert.equal(env.mail.sent.at(-1).to, 'bob@example.com');
+    assert.ok(!env.mail.sent.some((m) => /dan/i.test(m.to)));
+  });
+
+  test('camera emails stop at the daily limit and pick up where they left off', () => {
+    const env = ready();
+    saveMeals(env, 0, ALL_FISH, { 'Alice Smith': 'alice@example.com', 'Bob Smith': 'bob@example.com' });
+    saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, { 'Carol Jones': 'carol@example.com' });
+    env.mail.quota = 1;
+    assert.deepEqual(env.gs.sendCameraEmails_(env.c), { emails: 1, people: 1, quotaHit: true });
+    env.mail.quota = 100;
+    assert.equal(env.gs.sendCameraEmails_(env.c).emails, 2);
+    assert.deepEqual(env.mail.sent.map((m) => m.to).sort(), ['alice@example.com', 'bob@example.com', 'carol@example.com']);
+  });
+
+  test('once camera links have gone out, adding an email on the meal page sends one right away', () => {
+    const today = new Date();
+    const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const env = ready({ 'Ceremony Date': key, 'Camera Email Days Before': 3 });
+    saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, { 'Carol Jones': 'carol@example.com' });
+    assert.equal(env.mail.sent.filter((m) => m.to === 'carol@example.com').length, 1);
+    saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, { 'Carol Jones': 'carol@example.com' });
+    assert.equal(env.mail.sent.filter((m) => m.to === 'carol@example.com').length, 1);
+  });
+
+  test('Set up sheets installs one daily trigger, and it sends camera links when due', () => {
+    const env = ready();
+    env.gs.menuSetup();
+    env.gs.menuSetup();
+    assert.equal(env.triggers.length, 1);
+    assert.equal(env.triggers[0].handler, 'dailyTasks');
+    assert.equal(env.triggers[0].atHour, 9);
+    saveMeals(env, 1, { 'Carol Jones': 'Filet Mignon' }, { 'Carol Jones': 'carol@example.com' });
+    env.gs.dailyTasks(); // not due yet (the test wedding is far away)
+    assert.equal(env.mail.sent.length, 0);
+    const today = new Date();
+    setSettings(env, { 'Ceremony Date': `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate() + 0).padStart(2, '0')}` });
+    env.gs.dailyTasks();
+    assert.equal(env.mail.sent.length, 1);
+  });
+
+  test('a test camera email goes only to you', () => {
+    const env = ready();
+    env.gs.menuSendTestCameraEmail();
+    assert.equal(env.mail.sent.length, 1);
+    assert.equal(env.mail.sent[0].to, 'owner@example.com');
+    assert.match(env.mail.sent[0].subject, /^\[TEST\]/);
+    assert.ok(!env.mail.sent[0].htmlBody.includes('me='));
+  });
+
+  test('publishing the album leaves out hidden photos, shares the folder, closes uploads and emails everyone', () => {
+    const env = ready();
+    saveMeals(env, 0, ALL_FISH, { 'Alice Smith': 'smiths@example.com', 'Bob Smith': 'smiths@example.com' });
+    upload(env, { from: 'Keep' });
+    upload(env, { from: 'Blurry' });
+    const photos = env.ss.getSheetByName('Photos');
+    photos.getRange(3, 6).setValue(true);
+    const r = env.gs.publishAlbum_(env.c, new Date());
+    assert.equal(r.leftOut, 1);
+    const folder = [...env.drive.folders.values()].find((f) => f.name.endsWith('Wedding Photos'));
+    const leftOut = [...env.drive.folders.values()].find((f) => /left out/.test(f.name));
+    assert.deepEqual(folder.sharing, { access: 'ANYONE_WITH_LINK', permission: 'VIEW' });
+    const [keep, blurry] = photos.objects().map((p) => env.drive.files.get(p['File ID']));
+    assert.equal(keep.folder, folder.id);
+    assert.equal(blurry.folder, leftOut.id);
+    assert.deepEqual(blurry.sharing, { access: 'PRIVATE', permission: 'NONE' });
+    assert.equal(photos.objects()[1]['Album Status'], 'Left out');
+    // Uploads close; the page shows the album with a download link.
+    assert.equal(upload(env).error, 'closed');
+    const data = list(env).data;
+    assert.equal(data.uploads.open, false);
+    assert.deepEqual(data.album, { published: true, url: folder.getUrl() });
+    assert.deepEqual(data.photos.map((p) => p.from), ['Keep']);
+    // Everyone with an email gets the album once.
+    assert.equal(r.mail.emails, 1);
+    const mail = env.mail.sent.at(-1);
+    assert.equal(mail.to, 'smiths@example.com');
+    assert.equal(mail.subject, 'Our wedding photos are here!');
+    assert.ok(mail.htmlBody.includes(folder.getUrl()));
+    assert.equal(env.gs.publishAlbum_(env.c, new Date()).mail.emails, 0);
+  });
+
+  test('un-hiding a photo and publishing again puts it back in the album', () => {
+    const env = ready();
+    upload(env, { from: 'Second thoughts' });
+    const photos = env.ss.getSheetByName('Photos');
+    photos.getRange(2, 6).setValue(true);
+    env.gs.publishAlbum_(env.c, new Date());
+    photos.getRange(2, 6).setValue(false);
+    const r = env.gs.publishAlbum_(env.c, new Date());
+    assert.equal(r.restored, 1);
+    const file = env.drive.files.get(photos.objects()[0]['File ID']);
+    const folder = [...env.drive.folders.values()].find((f) => f.name.endsWith('Wedding Photos'));
+    assert.equal(file.folder, folder.id);
+    assert.deepEqual(file.sharing, { access: 'ANYONE_WITH_LINK', permission: 'VIEW' });
+    assert.equal(photos.objects()[0]['Album Status'], '');
+  });
+
+  test('clearing "Photo Album Published" reopens photo sharing', () => {
+    const env = ready();
+    env.gs.publishAlbum_(env.c, new Date());
+    assert.equal(upload(env).error, 'closed');
+    setSettings(env, { 'Photo Album Published': '' });
+    assert.equal(upload(env).ok, true);
+  });
+
+  test('the Summary counts emails, and the menu has the new items', () => {
+    const env = ready();
+    const labels = env.ss.getSheetByName('Summary').rows().map((r) => r[0]);
+    for (const l of ['Reception guests with an email address', 'Camera links emailed (addresses)', 'Album emailed (addresses)']) assert.ok(labels.includes(l), l);
+    env.gs.onOpen();
+    const fns = env.ui.menus.at(-1).items.map(([, fn]) => fn);
+    for (const fn of ['menuSendCameraEmails', 'menuSendTestCameraEmail', 'menuPublishAlbum']) assert.ok(fns.includes(fn), fn);
   });
 });
 

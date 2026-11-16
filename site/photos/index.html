@@ -47,7 +47,7 @@
         <img class="photos-hero__floral photos-hero__floral--bottom" src="../images/floral-bottom-left.png" alt="">
         <div class="photos-hero__inner">
           <p class="eyebrow" id="photos-eyebrow">Stephanie &amp; Robert</p>
-          <h1 class="photos-hero__title script">Share the moments</h1>
+          <h1 class="photos-hero__title script" id="photos-title">Share the moments</h1>
           <p class="photos-hero__text" id="photos-intro">Add your photos and see the day through everyone's eyes.</p>
           <div id="add-area">
             <div class="photos-actions">
@@ -65,7 +65,9 @@
               <input type="file" id="photo-input" class="visually-hidden" accept="image/*" multiple>
             </div>
             <p class="photos-hint" id="photos-hint">No app needed. Pick as many as you like.</p>
+            <p class="photos-left" id="photos-left" hidden></p>
           </div>
+          <a class="btn photos-add" id="album-download" href="#" target="_blank" rel="noopener" hidden>Download all photos</a>
           <p class="photos-closed" id="photos-closed" hidden></p>
         </div>
       </div>

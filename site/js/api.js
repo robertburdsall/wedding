@@ -86,10 +86,13 @@ window.WeddingAPI = (function () {
   }
 
   // The shared photo timeline (needs the photo code from the table cards).
-  async function getPhotos(code) {
+  // `who` is { me, device }: whose camera this is, so the page can show how many photos are left.
+  async function getPhotos(code, who = {}) {
     const url = new URL(apiUrl());
     url.searchParams.set('action', 'photos');
     url.searchParams.set('t', code);
+    if (who.me) url.searchParams.set('me', who.me);
+    if (who.device) url.searchParams.set('device', who.device);
     return request(url.toString(), { method: 'GET' });
   }
 

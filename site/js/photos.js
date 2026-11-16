@@ -49,12 +49,36 @@
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const setState = (state) => { app.dataset.state = state; };
 
+  function uuid() {
+    return window.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  // Whose camera this is: a guest's personal link (?me=… from their email), remembered on this
+  // phone so the table QR code opens the same camera. Otherwise each phone counts on its own.
+  const me = (() => {
+    const fromLink = (params.get('me') || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 20);
+    if (fromLink) store.set('wedding.photoMe', fromLink);
+    return fromLink || store.get('wedding.photoMe');
+  })();
+  let device = store.get('wedding.photoDevice');
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(device)) {
+    device = uuid();
+    store.set('wedding.photoDevice', device);
+  }
+  const who = { me, device };
+  if (params.get('me')) {
+    // Keep the personal part out of the address bar (and out of screenshots people share).
+    const clean = new URLSearchParams(location.search);
+    clean.delete('me');
+    history.replaceState(null, '', `?${clean}`);
+  }
+
   /* ---------- loading ---------- */
 
   function load() {
     if (!code) { showError({ code: 'no_code' }); return; }
     setState('loading');
-    API.getPhotos(code).then((d) => {
+    API.getPhotos(code, who).then((d) => {
       if (!d || !Array.isArray(d.photos)) throw new API.ApiError('not_ready', "Photo sharing isn't open yet. Please check back soon!");
       data = d;
       photos = d.photos.slice();
@@ -101,17 +125,56 @@
 
   /* ---------- page ---------- */
 
+  function firstName(name) {
+    return /^(mr|mrs|ms|miss|mx|dr)\.?\s/i.test(name) ? name : name.split(' ')[0];
+  }
+
   function render() {
     if (table) $('#photos-eyebrow').textContent = `Table ${table}`;
     const up = data.uploads || {};
+    const album = data.album || {};
+    const you = data.you || {};
     $('#add-area').hidden = up.open === false;
     const closed = $('#photos-closed');
-    closed.hidden = up.open !== false;
-    if (up.open === false) {
+    closed.hidden = up.open !== false || album.published;
+    const download = $('#album-download');
+    download.hidden = !(album.published && album.url);
+    if (album.published) {
+      // The finished album: no more uploads, and a link to download everything.
+      $('#photos-eyebrow').textContent = 'Stephanie & Robert';
+      $('#photos-title').textContent = 'Our wedding album';
+      $('#photos-intro').textContent = 'Thank you for capturing the celebration with us!';
+      if (album.url) download.href = album.url;
+    } else if (up.open === false) {
       $('#photos-intro').textContent = 'Here are all the photos everyone shared.';
       closed.textContent = `Photo sharing closed${up.untilText ? ` on ${up.untilText}` : ''}. Thank you for all the photos!`;
+    } else if (you.name) {
+      $('#photos-intro').textContent = `Hi ${firstName(you.name)}! This is your camera for the reception. Snap away, and see everyone's photos below.`;
     }
+    renderAllowance();
     renderTimeline();
+  }
+
+  // Photos this camera still has, minus any waiting to upload.
+  function photosLeft() {
+    const you = data.you || {};
+    if (!you.limit) return Infinity;
+    const queued = uploads.filter((u) => u.state !== 'done' && u.state !== 'failed').length;
+    return Math.max(0, you.left - queued);
+  }
+
+  function renderAllowance() {
+    const you = data.you || {};
+    const el = $('#photos-left');
+    const open = !(data.uploads && data.uploads.open === false);
+    el.hidden = !you.limit || !open;
+    if (!you.limit || !open) return;
+    const left = photosLeft();
+    el.textContent = left > 0
+      ? `${left} of ${you.limit} photo${you.limit === 1 ? '' : 's'} left`
+      : `That's all ${you.limit} of your photos. Thank you for sharing!`;
+    $('.photos-actions').hidden = left <= 0;
+    $('#photos-hint').hidden = left <= 0;
   }
 
   function byTime(a, b) {
@@ -173,7 +236,7 @@
     if (refreshing || Date.now() - lastRefresh < 15000 || !$('#lightbox').hidden) return;
     refreshing = true;
     lastRefresh = Date.now();
-    API.getPhotos(code).then((d) => {
+    API.getPhotos(code, who).then((d) => {
       if (!d || !Array.isArray(d.photos)) return;
       const known = new Set(photos.map((p) => p.id));
       const fresh = d.photos.filter((p) => !known.has(p.id));
@@ -233,10 +296,17 @@
       if (skipped) alert('Only photos can be shared here (not videos).');
       return;
     }
-    picked = images.slice(0, MAX_PER_PICK);
+    const left = photosLeft();
+    if (left <= 0) { renderAllowance(); return; }
+    const most = Math.min(MAX_PER_PICK, left);
+    picked = images.slice(0, most);
     let note = '';
     if (skipped) note = `${plural(skipped, 'video')} left out: only photos can be shared here.`;
-    if (images.length > MAX_PER_PICK) note = `You can share up to ${MAX_PER_PICK} at a time, so we'll start with the first ${MAX_PER_PICK}.`;
+    if (images.length > most) {
+      note = most === left
+        ? `You have ${plural(left, 'photo')} left, so we'll share the first ${left}.`
+        : `You can share up to ${MAX_PER_PICK} at a time, so we'll start with the first ${MAX_PER_PICK}.`;
+    }
     openSheet(note);
   }
 
@@ -255,7 +325,7 @@
     const old = sheet.querySelector('.share-sheet__note');
     if (old) old.remove();
     if (note) previews.after(h('p', { class: 'share-sheet__note', text: note }));
-    $('#share-from').value = store.get('wedding.photoFrom');
+    $('#share-from').value = store.get('wedding.photoFrom') || (data.you && data.you.name) || '';
     $('#share-caption').value = '';
     sheet.hidden = false;
     document.body.classList.add('no-scroll');
@@ -278,6 +348,7 @@
     picked.forEach((file) => addUpload(file, from, caption));
     picked = [];
     closeSheet();
+    renderAllowance();
     pump();
     $('#upload-queue').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
@@ -337,7 +408,7 @@
     }
   }
 
-  const NO_RETRY = new Set(['closed', 'bad_photo', 'too_large', 'not_found', 'bad_request', 'not_ready']);
+  const NO_RETRY = new Set(['closed', 'bad_photo', 'too_large', 'not_found', 'bad_request', 'not_ready', 'limit_reached']);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function send(item) {
@@ -357,17 +428,20 @@
     const payload = {
       code, data: base64, from: item.from, caption: item.caption, table,
       takenAt: prepared.takenAt ? prepared.takenAt.toISOString() : '',
-      width: prepared.width, height: prepared.height, uploadId: item.id,
+      width: prepared.width, height: prepared.height, uploadId: item.id, me, device,
     };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const res = await API.uploadPhoto(payload);
         item.state = 'done';
+        if (res && res.you) data.you = res.you;
         update(item);
+        renderAllowance();
         if (res && res.photo && res.photo.id) addToTimeline(res.photo, prepared.previewUrl);
         item.prepared = null; // let the phone free the memory
         return;
       } catch (err) {
+        if (err && err.code === 'limit_reached' && data.you) data.you.left = 0;
         if (err && NO_RETRY.has(err.code)) return fail(item, err.message || 'This photo could not be shared.', false);
         if (attempt < 2) await sleep(3000 * (attempt + 1));
         else return fail(item, 'The connection dropped.', true);
@@ -380,6 +454,7 @@
     item.message = message;
     item.canRetry = canRetry;
     update(item);
+    renderAllowance();
   }
 
   function addToTimeline(photo, previewUrl) {

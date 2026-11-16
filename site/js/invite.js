@@ -98,6 +98,7 @@
     document.title = `For ${data.addressee || formatList(data.guests)} · Stephanie & Robert`;
     renderInvitation(data);
     renderEvents(data);
+    renderRegistry();
     buildForm(data);
     renderRsvpPanel();
     setState('invite');
@@ -185,6 +186,16 @@
         }) : null
       ));
     });
+  }
+
+  // The registry card under the event details, when js/config.js has a registry link.
+  function renderRegistry() {
+    const raw = (window.WEDDING_CONFIG && window.WEDDING_CONFIG.registryUrl) || '';
+    let url = null;
+    try { url = new URL(raw); } catch (err) { /* not set */ }
+    const ok = url && url.protocol === 'https:';
+    $('#registry-card').hidden = !ok;
+    if (ok) $('#registry-card-link').href = url.toString();
   }
 
   /* ---------- RSVP panel ---------- */

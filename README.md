@@ -6,7 +6,8 @@ Wedding website with personal e-vite invitations and RSVPs.
 - **Personal invitations:** each household gets its own link. *Wedding + Reception* and *Ceremony Only* guests see different invitations, and plus ones are allowed per household.
 - **RSVPs go straight into a Google Sheet,** with live totals for the ceremony and the reception.
 - **Reception dinner choices:** reception guests get a personal meal link to choose their dinner and note any dietary restrictions; choices land in their row.
-- **Photo sharing at the reception:** a QR code on each table opens a shared album. Guests add photos from their phones, everyone sees them on a timeline of the day, and a live slideshow can run on a screen. Photos are saved to a Google Drive folder.
+- **Photo sharing at the reception:** reception guests get their own camera link by email 3 days before the wedding (20 photos each), and a QR code on each table opens it too. Everyone sees the photos as they come in, and a live slideshow can run on a screen. Photos are saved to a Google Drive folder. Afterwards you hide any you don't want and publish the album, which emails everyone a link to view and download it.
+- **Registry:** a button on the main page and a card on every invitation.
 - **Each household gets a ready-to-send text message** with its personal link. Invitations can also be emailed from the Sheet's "💌 Wedding" menu.
 
 **Start here → [SETUP.md](SETUP.md)**
