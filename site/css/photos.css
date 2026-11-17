@@ -85,6 +85,7 @@ body.no-scroll { overflow: hidden; }
 .tile:hover img { transform: scale(1.03); }
 .tile--broken img { visibility: hidden; }
 .tile--broken::after { content: 'Still processing…'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75rem; color: var(--color-text-muted); }
+.timeline__note { text-align: center; font-family: var(--font-serif); font-style: italic; font-size: 1.05rem; color: var(--color-text-muted); margin: 0 auto 18px; max-width: 34em; }
 .timeline__empty { text-align: center; font-family: var(--font-serif); font-style: italic; font-size: 1.2rem; color: var(--color-text-muted); margin: 30px 0; }
 
 /* ---------- Name & note before sharing ---------- */

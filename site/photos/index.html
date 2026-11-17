@@ -48,7 +48,7 @@
         <div class="photos-hero__inner">
           <p class="eyebrow" id="photos-eyebrow">Stephanie &amp; Robert</p>
           <h1 class="photos-hero__title script" id="photos-title">Share the moments</h1>
-          <p class="photos-hero__text" id="photos-intro">Add your photos and see the day through everyone's eyes.</p>
+          <p class="photos-hero__text" id="photos-intro">Add your photos from the reception. They come straight to us, and we'll send everyone the album after the wedding.</p>
           <div id="add-area">
             <div class="photos-actions">
               <!-- Phones: opens the camera right away. Hidden on computers (see photos.js). -->
@@ -87,9 +87,10 @@
             <button type="button" class="chip" data-sort="newest" aria-pressed="false">Newest first</button>
           </div>
         </div>
+        <p class="timeline__note" id="timeline-note" hidden>Only you can see these. Everyone's photos come to us first, and we'll share the album after the wedding.</p>
         <button type="button" class="new-photos" id="new-photos" hidden></button>
         <div class="timeline__grid" id="timeline-grid"></div>
-        <p class="timeline__empty" id="timeline-empty" hidden>No photos yet. Be the first to share one!</p>
+        <p class="timeline__empty" id="timeline-empty" hidden>The photos you share will show up here. Only you can see them.</p>
       </div>
     </section>
   </main>
@@ -100,7 +101,7 @@
       <h2 class="share-sheet__title" id="share-title">Share photos</h2>
       <div class="share-sheet__previews" id="share-previews"></div>
       <label class="field-label" for="share-from">Your name <span class="optional">(optional)</span></label>
-      <input class="input" id="share-from" maxlength="60" autocomplete="name" placeholder="So everyone knows who took them">
+      <input class="input" id="share-from" maxlength="60" autocomplete="name" placeholder="So we know who took them">
       <label class="field-label" for="share-caption">Add a note <span class="optional">(optional)</span></label>
       <input class="input" id="share-caption" maxlength="200" placeholder="For example: First dance!">
       <div class="share-sheet__actions">

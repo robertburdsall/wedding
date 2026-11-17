@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '2.1.0';
+var VERSION = '2.2.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -99,7 +99,7 @@ var PHOTO_COL = {
 };
 var PHOTO_HEADERS = Object.keys(PHOTO_COL).map(function (k) { return PHOTO_COL[k]; });
 var PHOTO_HEADER_NOTES = {
-  'Hidden': 'Tick to take this photo off the timeline and slideshow. The file stays in your Drive folder.',
+  'Hidden': 'Tick to leave this photo out of the album. Guests never see anyone else\'s photos until you publish the album.',
   'Taken At': 'When the photo was taken, according to the guest\'s phone. The timeline is in this order.',
   'Table': 'Which table card the guest scanned.',
   'Photo': 'The photo in your Google Drive folder.',
@@ -165,11 +165,11 @@ var SETTINGS_DEFAULTS = [
   ['Meal Options', 'North Atlantic Salmon / Filet Mignon', 'The dinner choices for reception guests, separated by " / ". After changing them, run Wedding → Set up sheets so the Summary counts them.'],
   ['Meal Deadline', '', 'Last day reception guests can choose or change their meals. Blank = no deadline.'],
   ['Meal Text Message', MEAL_TEXT_DEFAULT, 'Wording for the "Meal Text Message" column. You can use: {first names} {names} {meal link} {meal deadline} {code}'],
-  ['Photo Code', '', 'The secret code on the table QR cards that lets guests share and see photos. Filled in automatically. Clear it to get a new one (old cards then stop working).'],
-  ['Photo Uploads Until', '', 'Last day guests can add photos. Blank = no end. The timeline stays viewable either way.'],
+  ['Photo Code', '', 'The secret code on the table QR cards that lets guests share photos. Filled in automatically. Clear it to get a new one (old cards then stop working).'],
+  ['Photo Uploads Until', '', 'Last day guests can add photos. Blank = no end (until you publish the album).'],
   ['Photo Folder', '', 'Filled in automatically: the Google Drive folder photos are saved to. You can paste the link to a different folder of yours instead.'],
   ['Photo Page Link', '', 'Filled in automatically: the link in the table QR codes.'],
-  ['Photo Slideshow Link', '', 'Filled in automatically: open this on a TV or projector for a live slideshow of the photos.'],
+  ['Photo Slideshow Link', '', 'Filled in automatically: a slideshow of the album for a TV or projector. It shows photos only after you publish the album.'],
   ['Photo Table Cards Link', '', 'Filled in automatically: open this on a computer to print the table QR cards.'],
   ['Photos Per Person', 20, 'How many photos each guest can share with their camera. Blank = no limit.'],
   ['Camera Email Days Before', 3, 'How many days before the Ceremony Date to email each reception guest their personal camera link (around 9 AM). Blank = don\'t send automatically.'],
@@ -896,9 +896,10 @@ function logMeals_(c, now, g, body) {
 }
 
 /* =====================================================================
- * Photo sharing: guests scan the QR card on their table, add photos, and see
- * everyone's photos on a timeline. Photos are saved to a Google Drive folder
- * and listed on the "Photos" tab, where ticking "Hidden" takes one off the timeline.
+ * Photo sharing: reception guests use their emailed camera link (or the QR card on
+ * their table) to add photos. Photos are saved to a Google Drive folder and listed on
+ * the "Photos" tab. Guests only see their own photos until the couple reviews them
+ * (ticking "Hidden" leaves one out) and publishes the album.
  * ===================================================================== */
 
 function photoCode_(settings) {
@@ -1016,12 +1017,18 @@ function photosPayload_(c, settings, now, params) {
   var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
   var published = albumPublished_(settings);
   var all = readPhotos_(c);
+  var person = params.me ? cameraPerson_(c, params.me, now) : null;
+  var uploader = person ? person.id : deviceId_(params.device);
+  // Nobody sees anyone else's photos until the couple has reviewed them and published the
+  // album. Until then each camera only gets back the photos it took itself.
   var photos = all
-    .filter(function (p) { return !p.hidden && DRIVE_ID_.test(p.id); })
+    .filter(function (p) {
+      if (!DRIVE_ID_.test(p.id) || p.hidden) return false;
+      return published || (uploader !== '' && p.uploader === uploader);
+    })
     .map(publicPhoto_)
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : (a.uploadedAt < b.uploadedAt ? -1 : 1); });
-  var person = params.me ? cameraPerson_(c, params.me, now) : null;
-  var you = photoAllowance_(all, person ? person.id : deviceId_(params.device), settings);
+  var you = photoAllowance_(all, uploader, settings);
   you.name = person ? person.name : '';
   var album = { published: published };
   if (published) album.url = folderUrl_(setting_(settings, 'Photo Folder'));
@@ -1302,7 +1309,7 @@ function buildCameraEmail_(people, settings) {
   var several = people.length > 1;
   var intro = (several ? 'Each of you has your own camera for the reception' : 'Here is your own camera for the reception') +
     (limit ? ': take up to ' + limit + ' photos' + (several ? ' each' : '') : '') +
-    ', and see everyone else\'s photos as they come in. Just open it on your phone. No app needed.';
+    '. Just open it on your phone. No app needed.';
   var buttons = people.map(function (p) {
     return emailButton_(p.link, several ? 'OPEN ' + firstNames_([p.name]).toUpperCase() + '\'S CAMERA' : 'OPEN YOUR CAMERA');
   }).join('');
@@ -1311,7 +1318,7 @@ function buildCameraEmail_(people, settings) {
     '<p style="margin:0 0 16px;">Our wedding is almost here, and we\'d love to see the celebration through your eyes. ' + escapeHtml_(intro) + '</p>' +
     buttons +
     '<p style="margin:0 0 16px;">Keep this email handy so you can find your camera at the reception. Please save your photos for the reception, not the ceremony.</p>' +
-    '<p style="margin:0 0 16px;">After the wedding, we\'ll gather everyone\'s photos into an album and send it to you.</p>' +
+    '<p style="margin:0 0 16px;">Your photos come straight to us. After the wedding, we\'ll look through everyone\'s photos, gather them into an album and send it to you.</p>' +
     SIGNATURE_HTML_, settings);
   var text = 'Hi ' + firstNames_(names) + '!\n\nOur wedding is almost here, and we\'d love to see the celebration through your eyes. ' + intro + '\n\n' +
     people.map(function (p) { return (several ? p.name + ': ' : 'Your camera: ') + p.link; }).join('\n') +
@@ -2061,7 +2068,7 @@ function menuPhotoLinks() {
   photoFolderId_(c, settings);
   ui_().alert('Photo sharing\n\n' +
     'Table cards (open on a computer and print):\n' + setting_(settings, 'Photo Table Cards Link') + '\n\n' +
-    'Slideshow (open on the TV or projector):\n' + setting_(settings, 'Photo Slideshow Link') + '\n\n' +
+    'Album slideshow (shows photos once you publish the album):\n' + setting_(settings, 'Photo Slideshow Link') + '\n\n' +
     'Photo page (what the QR codes open):\n' + setting_(settings, 'Photo Page Link') + '\n\n' +
     'Photos are saved to:\n' + setting_(settings, 'Photo Folder') + '\n\n' +
     'These are also on the Settings tab.');

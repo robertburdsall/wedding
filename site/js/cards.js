@@ -31,7 +31,7 @@
       h('img', { class: 'card__floral card__floral--bottom', src: '../images/floral-bottom-left.png', alt: '' }),
       table ? h('p', { class: 'card__table', text: `Table ${table}` }) : null,
       h('p', { class: 'card__title', text: 'Share the moments' }),
-      h('p', { class: 'card__text', text: "Scan to add your photos and see the day through everyone’s eyes." }),
+      h('p', { class: 'card__text', text: "Scan to share your photos with us. We’ll send everyone the album after the wedding." }),
       h('div', { class: 'card__qr' }, T.qrSvg(url, { label: table ? `QR code for table ${table}` : 'QR code' })),
       h('p', { class: 'card__how', text: "Open your phone’s camera · no app needed" }),
       h('p', { class: 'card__fallback', text: fallback }),

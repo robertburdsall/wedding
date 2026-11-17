@@ -1,5 +1,6 @@
-// Live slideshow for a TV or projector at the reception (photos/slideshow.html?t=PHOTOCODE).
-// Shows every shared photo in a shuffled loop, and jumps to new photos as soon as they come in.
+// Slideshow of the photo album for a TV or projector (photos/slideshow.html?t=PHOTOCODE).
+// Photos only come back from the server once the couple has reviewed and published the album,
+// so before then it shows a waiting screen. Shows the album in a shuffled loop.
 (function () {
   'use strict';
 

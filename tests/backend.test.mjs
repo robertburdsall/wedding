@@ -1641,8 +1641,11 @@ describe('photo sharing', () => {
   // A tiny stand-in for a JPEG: the server only checks it starts like one.
   const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake photo bytes for testing')]).toString('base64');
   const photoCode = (env) => env.gs.readSettings_(env.c)['Photo Code'];
-  const upload = (env, extra = {}) => apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, ...extra });
-  const list = (env, code = photoCode(env)) => apiGet(env, { action: 'photos', t: code });
+  // Uploads come from one test phone, and the list is asked for from that phone, so it shows
+  // that phone's own photos (all anyone gets back before the album is published).
+  const PHONE = 'test-phone-0001';
+  const upload = (env, extra = {}) => apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, device: PHONE, ...extra });
+  const list = (env, code = photoCode(env), device = PHONE) => apiGet(env, { action: 'photos', t: code, device });
   const photoRows = (env) => env.ss.getSheetByName('Photos').objects();
 
   test('setup makes a Photos tab, a secret photo code and the photo links', () => {
@@ -1738,6 +1741,25 @@ describe('photo sharing', () => {
     upload(env, { from: 'No time' });
     assert.equal(env.drive.folders.size, 1);
     assert.deepEqual(list(env).data.photos.map((p) => p.from), ['Early', 'Late', 'No time']);
+  });
+
+  test('before the album is published, nobody sees anyone else’s photos', () => {
+    const env = setup();
+    upload(env, { from: 'Mine', device: 'phone-aaaa-1111' });
+    upload(env, { from: 'Theirs', device: 'phone-bbbb-2222' });
+    upload(env, { from: 'No phone id', device: '' });
+    const seen = (device) => list(env, photoCode(env), device).data.photos.map((p) => p.from);
+    assert.deepEqual(seen('phone-aaaa-1111'), ['Mine']);
+    assert.deepEqual(seen('phone-bbbb-2222'), ['Theirs']);
+    // No phone id (like the slideshow) or a made-up one: nothing at all.
+    assert.deepEqual(seen(''), []);
+    assert.deepEqual(seen('phone-zzzz-9999'), []);
+    assert.deepEqual(apiGet(env, { action: 'photos', t: photoCode(env) }).data.photos, []);
+    // Publishing opens the album to everyone, minus what the couple hid.
+    env.ss.getSheetByName('Photos').getRange(3, 6).setValue(true);
+    env.gs.publishAlbum_(env.c, new Date());
+    assert.deepEqual(seen('').sort(), ['Mine', 'No phone id']);
+    assert.deepEqual(seen('phone-bbbb-2222').sort(), ['Mine', 'No phone id']);
   });
 
   test('a retried upload (same upload id) is only saved once', () => {

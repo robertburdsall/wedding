@@ -30,7 +30,7 @@ You now have five tabs:
 | **Guests** | One row per household/invitation. White columns are yours to fill in. Grey columns are filled in automatically. |
 | **Summary** | Live totals: invites sent and opened, plus ones coming or not, households responded, plus how many people are attending or have declined the ceremony, and the same for the reception. |
 | **Settings** | Times, venues, RSVP deadline, email options. |
-| **Photos** | One row per photo shared at the reception. Tick **Hidden** to take one off the timeline. |
+| **Photos** | One row per photo shared at the reception. Tick **Hidden** to leave one out of the album. |
 | **RSVP Log** | Every response ever submitted, including changes. Useful if someone says "but I RSVP'd!" |
 
 ## 2. Publish the script as a web app
@@ -152,26 +152,28 @@ Every *Wedding + Reception* household also gets a **Meal Link** (`yourdomain.com
 
 ## Photo sharing at the reception
 
-Guests scan a QR code on their table to add photos from their phone, with no app needed. Everyone sees every photo on a timeline in the order they were taken. A slideshow page can run on a TV or projector and shows new photos within about 20 seconds.
+Reception guests take photos with their own camera link (emailed to them) or by scanning the QR code on their table, with no app needed. **Nobody sees anyone else's photos until you publish the album.** Until then each guest only sees the photos they took themselves. You review everything on the Photos tab, hide what you don't want, and publish. Then everyone gets the album.
 
 **Where things go**
 
 - Photos are saved to a Google Drive folder, made automatically the first time you run **Set up sheets** (called *Stephanie & Robert — Wedding Photos*). After the wedding, right-click the folder → **Download** to keep them all.
 - Each photo gets a row on the **Photos** tab: when it was taken, who shared it (if they typed a name), their note, their table and a small preview.
-- **To take a photo down,** tick **Hidden** on its row. It disappears from the timeline and slideshow within a minute, and the file stays in your folder. Deleting the row works too.
+- **To leave a photo out of the album,** tick **Hidden** on its row. The file stays in your folder until you publish, when it moves to a separate private folder.
 - Phones shrink photos to 3000 pixels on the long side before uploading, which keeps uploads quick on venue signal and is still plenty for prints. This also strips location data.
 - Photos only. Videos are skipped with a short note to the guest.
 
 **Who can see the photos**
 
-Only people with the **Photo Code**, which is printed on the table cards and found on the Settings tab. The photo pages aren't linked from the main website and search engines are told to ignore them. Each photo file is shared as "anyone with the link" (that's how the timeline shows it), but the links are only given to people who have the code. To shut out an old code (say, a test card you printed), clear **Photo Code** on Settings and a new one is made. Then print the cards again.
+Before you publish the album: only the two of you (on the Photos tab and in the Drive folder) and the guest who took each photo. The camera page never sends a guest anyone else's photos, and the slideshow stays on a waiting screen. Each photo file is shared as "anyone with the link" so the Photos tab can show its preview, but those links are only ever handed to the guest who took it.
+
+After you publish: everyone with the **Photo Code** (printed on the table cards) or an album email, minus the photos you hid. The photo pages aren't linked from the main website and search engines are told to ignore them. To shut out an old code (say, a test card you printed), clear **Photo Code** on Settings and a new one is made. Then print the cards again.
 
 **Settings**
 
 | Setting | What it does |
 |---|---|
 | Photo Code | The secret code on the cards. Filled in automatically. |
-| Photo Uploads Until | Last day guests can add photos, for example two weeks after the wedding. Blank = no end. The timeline stays viewable after that. |
+| Photo Uploads Until | Last day guests can add photos, for example two weeks after the wedding. Blank = no end (sharing also closes when you publish the album). |
 | Photo Folder | Filled in automatically. Paste a link to a different Drive folder of yours if you'd rather use your own. |
 | Photos Per Person | How many photos each camera can share (20). Blank = no limit. |
 | Camera Email Days Before | When to email reception guests their camera links: this many days before the Ceremony Date (3). Blank = only when you use the menu. |
@@ -182,8 +184,8 @@ Only people with the **Photo Code**, which is printed on the table cards and fou
 **Before the wedding**
 
 1. Open the **Photo Table Cards Link** on a computer. Set the number of tables and print (two 5×7 cards per letter page, landscape). Cut along the dashed lines.
-2. Test it: scan a card with your phone, share a couple of photos, and check they show on the timeline and on the Photos tab. Then tick **Hidden** on the test photos.
-3. If you'll have a screen at the reception, open the **Photo Slideshow Link** on the laptop connected to it and click once for full screen. It runs on its own, keeps the screen awake, and shows a QR code in the corner.
+2. Test it: scan a card with your phone, share a couple of photos, and check they show on your phone under "from you" and on the Photos tab. Then tick **Hidden** on the test photos.
+3. The **Photo Slideshow Link** shows the album on a TV or projector, but only after you publish it (handy for a get-together after the wedding). Click once for full screen.
 
 ### Personal cameras for reception guests
 
@@ -263,5 +265,5 @@ This runs about 130 automated tests covering the RSVP backend (in a simulated Go
 | *"This invitation isn't quite ready yet"* | That row has no **Invite Type** (or no names). |
 | No 💌 Wedding menu | Reload the sheet and wait a few seconds. |
 | Photo page says *"Photo sharing isn't open yet"* | The web app is running a `Code.gs` older than 2.0.0, or **Set up sheets** hasn't been run since updating. |
-| A photo on the timeline shows *"Still processing…"* | Google Drive takes a few seconds to make the small version of a new photo. It appears on the next refresh. If it never does, check the file in the Drive folder is shared as "Anyone with the link". |
+| A photo on the camera page shows *"Still processing…"* | Google Drive takes a few seconds to make the small version of a new photo. It appears on the next refresh. If it never does, check the file in the Drive folder is shared as "Anyone with the link". |
 | *"Exception: You do not have permission to call DriveApp"* | Replace `appsscript.json` with the repo's version and run **Set up sheets** again to authorize Drive. |

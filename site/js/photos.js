@@ -1,6 +1,7 @@
-// The shared photo album: guests scan the QR code on their table, add photos from their
-// phone, and see everyone's photos on a timeline. Photos are saved to Google Drive through
-// the Apps Script (apps-script/Code.gs) and listed on the "Photos" tab of the Sheet.
+// The reception camera and, once it's published, the photo album. Guests open their emailed
+// camera link (or scan the QR code on their table) and add photos from their phone. Photos are
+// saved to Google Drive through the Apps Script (apps-script/Code.gs) and listed on the "Photos"
+// tab of the Sheet. Until the couple publishes the album, each guest only sees their own photos.
 (function () {
   'use strict';
 
@@ -146,11 +147,12 @@
       $('#photos-intro').textContent = 'Thank you for capturing the celebration with us!';
       if (album.url) download.href = album.url;
     } else if (up.open === false) {
-      $('#photos-intro').textContent = 'Here are all the photos everyone shared.';
+      $('#photos-intro').textContent = "We'll send everyone the album once we've looked through all the photos.";
       closed.textContent = `Photo sharing closed${up.untilText ? ` on ${up.untilText}` : ''}. Thank you for all the photos!`;
     } else if (you.name) {
-      $('#photos-intro').textContent = `Hi ${firstName(you.name)}! This is your camera for the reception. Snap away, and see everyone's photos below.`;
+      $('#photos-intro').textContent = `Hi ${firstName(you.name)}! This is your camera for the reception. Snap away! Your photos come straight to us, and we'll send everyone the album after the wedding.`;
     }
+    $('#timeline-note').hidden = !!album.published || !photos.length;
     renderAllowance();
     renderTimeline();
   }
@@ -207,8 +209,11 @@
       retryingImage(img, photo, 600);
       grid.append(h('button', { type: 'button', class: 'tile', 'data-id': photo.id, onclick: () => openLightbox(i) }, img));
     });
-    $('#timeline-count').textContent = photos.length ? plural(photos.length, 'photo') : '';
+    const published = !!(data && data.album && data.album.published);
+    $('#timeline-count').textContent = photos.length ? (published ? plural(photos.length, 'photo') : `${plural(photos.length, 'photo')} from you`) : '';
+    $('#timeline-empty').textContent = published ? 'There are no photos in the album yet.' : "The photos you share will show up here. Only you can see them.";
     $('#timeline-empty').hidden = photos.length > 0;
+    $('#timeline-note').hidden = published || !photos.length;
     $('.timeline__bar').hidden = photos.length < 2;
   }
 

@@ -118,18 +118,20 @@ describe('website ↔ Apps Script over HTTP', () => {
     await assert.rejects(api.getMeals(code(2)), (err) => err.code === 'not_reception');
   });
 
-  test('a photo uploads over HTTP (no preflight) and shows on the timeline', async () => {
+  test('a photo uploads over HTTP (no preflight); only that phone sees it before the album', async () => {
     const t = dev.env.gs.readSettings_(dev.env.gs.ctx_())['Photo Code'];
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200000, 9)]).toString('base64');
     log.length = 0;
-    const res = await api.uploadPhoto({ code: t, data: jpeg, from: 'Test Guest', table: '3', takenAt: new Date().toISOString(), width: 10, height: 10, uploadId: 'e2e-1' });
+    const res = await api.uploadPhoto({ code: t, data: jpeg, from: 'Test Guest', table: '3', takenAt: new Date().toISOString(), width: 10, height: 10, uploadId: 'e2e-1', device: 'e2e-phone-1' });
     assert.ok(!log.includes('preflight'));
     assert.equal(res.photo.from, 'Test Guest');
-    const list = await api.getPhotos(t);
-    assert.ok(list.photos.some((p) => p.id === res.photo.id));
+    const mine = await api.getPhotos(t, { device: 'e2e-phone-1' });
+    assert.ok(mine.photos.some((p) => p.id === res.photo.id));
+    const someoneElse = await api.getPhotos(t, { device: 'e2e-phone-2' });
+    assert.ok(!someoneElse.photos.some((p) => p.id === res.photo.id));
     // Each phone's photo count comes back with the list.
     await api.uploadPhoto({ code: t, data: jpeg, device: 'e2e-phone-1', uploadId: 'e2e-2' });
-    assert.deepEqual((await api.getPhotos(t, { device: 'e2e-phone-1' })).you, { limit: 20, used: 1, left: 19, name: '' });
+    assert.deepEqual((await api.getPhotos(t, { device: 'e2e-phone-1' })).you, { limit: 20, used: 2, left: 18, name: '' });
     await assert.rejects(api.getPhotos('WRONGCODE'), (err) => err.code === 'not_found');
     // The dev server serves the "Drive" file so the pages can be previewed locally.
     const img = await fetch(`${dev.siteUrl}/__drive/${res.photo.id}?sz=w600`);
