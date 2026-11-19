@@ -28,7 +28,7 @@ You now have five tabs:
 | Tab | What it's for |
 |---|---|
 | **Guests** | One row per household/invitation. White columns are yours to fill in. Grey columns are filled in automatically. |
-| **Summary** | Live totals: invites sent and opened, plus ones coming or not, households responded, plus how many people are attending or have declined the ceremony, and the same for the reception. |
+| **Summary** | Live totals: invites sent and opened, and households responded. Then the **ceremony** and the **reception** each get their own section: households and people invited, plus ones offered, the most possible, who's attending or declined, who you're still waiting on, and the total if everyone still waiting says yes. Then plus ones, meals, photos and emails. |
 | **Settings** | Times, venues, RSVP deadline, email options. |
 | **Photos** | One row per photo shared at the reception. Tick **Hidden** to leave one out of the album. |
 | **RSVP Log** | Every response ever submitted, including changes. Useful if someone says "but I RSVP'd!" |

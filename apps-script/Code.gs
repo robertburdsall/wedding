@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '2.2.0';
+var VERSION = '2.3.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -1929,17 +1929,61 @@ function setupSheets_(c) {
     ['Households responded', '=COUNTIF(' + col(COL.status) + ',"' + STATUS.attending + '")+COUNTIF(' + col(COL.status) + ',"' + STATUS.declined + '")'],
     ['Households waiting on', '=B3-B10'],
     ['Households declined', '=COUNTIF(' + col(COL.status) + ',"' + STATUS.declined + '")'],
-    ['', ''],
-    ['Ceremony: attending (people, incl. plus ones)', people(COL.ceremony)],
-    ['Ceremony: declined (people)', people(COL.ceremonyDeclined)],
-    ['Reception: attending (people, incl. plus ones)', people(COL.reception)],
-    ['Reception: declined (people)', people(COL.receptionDeclined)],
-    ['', ''],
+    ['', '']
+  ];
+  // The ceremony and the reception, each counted on its own. Everyone is invited to the
+  // ceremony; only "Wedding + Reception" households to the reception. For each: who's
+  // invited, who has answered, who hasn't yet, and the most it could still grow to.
+  var sectionHeads = [];
+  var highlights = [];
+  function eventSection(title, ev) {
+    var T = col(COL.type), S = col(COL.status), P = col(COL.partySize), PO = col(COL.plusOne), POS = col(COL.plusOneStatus);
+    var full = '"' + TYPE_FULL + '"';
+    var yes = '"' + STATUS.attending + '"', no = '"' + STATUS.declined + '"', waiting = '"' + PLUS_ONE_STATUS.waiting + '"';
+    // Formulas for the whole guest list (ceremony) or just reception households.
+    var f = ev === 'ceremony' ? {
+      households: '=COUNTA(' + col(COL.names) + ')',
+      people: '=SUM(' + P + ')',
+      plusOnes: '=COUNTIF(' + PO + ',"Yes")',
+      householdsWaiting: '=COUNTA(' + col(COL.names) + ')-COUNTIF(' + S + ',' + yes + ')-COUNTIF(' + S + ',' + no + ')',
+      peopleWaiting: '=SUM(' + P + ')-SUMIF(' + S + ',' + yes + ',' + P + ')-SUMIF(' + S + ',' + no + ',' + P + ')',
+      plusOnesWaiting: '=COUNTIF(' + POS + ',' + waiting + ')',
+      attending: people(COL.ceremony),
+      declined: people(COL.ceremonyDeclined)
+    } : {
+      households: '=COUNTIF(' + T + ',' + full + ')',
+      people: '=SUMIF(' + T + ',' + full + ',' + P + ')',
+      plusOnes: '=COUNTIFS(' + T + ',' + full + ',' + PO + ',"Yes")',
+      householdsWaiting: '=COUNTIF(' + T + ',' + full + ')-COUNTIFS(' + T + ',' + full + ',' + S + ',' + yes + ')-COUNTIFS(' + T + ',' + full + ',' + S + ',' + no + ')',
+      peopleWaiting: '=SUMIF(' + T + ',' + full + ',' + P + ')-SUMIFS(' + P + ',' + T + ',' + full + ',' + S + ',' + yes + ')-SUMIFS(' + P + ',' + T + ',' + full + ',' + S + ',' + no + ')',
+      plusOnesWaiting: '=COUNTIFS(' + T + ',' + full + ',' + POS + ',' + waiting + ')',
+      attending: people(COL.reception),
+      declined: people(COL.receptionDeclined)
+    };
+    function add(label, formula) { rows.push([title + ': ' + label, formula]); return rows.length; }
+    rows.push([title.toUpperCase(), '']);
+    sectionHeads.push(rows.length);
+    add('households invited', f.households);
+    var invited = add('people invited (not counting plus ones)', f.people);
+    var offered = add('plus ones offered', f.plusOnes);
+    add('most possible (everyone invited + every plus one)', '=B' + invited + '+B' + offered);
+    var attending = add('attending (people, incl. plus ones)', f.attending);
+    highlights.push(attending);
+    add('declined (people)', f.declined);
+    add('households still waiting on', f.householdsWaiting);
+    var peopleWaiting = add('people still waiting on (not counting plus ones)', f.peopleWaiting);
+    var plusWaiting = add('plus ones still waiting on', f.plusOnesWaiting);
+    highlights.push(add('total if everyone still waiting says yes', '=B' + attending + '+B' + peopleWaiting + '+B' + plusWaiting));
+    rows.push(['', '']);
+  }
+  eventSection('Ceremony', 'ceremony');
+  eventSection('Reception', 'reception');
+  rows.push(
     ['Plus ones coming', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.bringing + '")'],
     ['Plus ones not coming', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.notBringing + '")'],
     ['Plus ones still waiting on an RSVP', '=COUNTIF(' + col(COL.plusOneStatus) + ',"' + PLUS_ONE_STATUS.waiting + '")'],
     ['', '']
-  ];
+  );
   // One row per meal option, counted from "Name: Meal" entries, then who still has to choose.
   var settingsNow = readSettings_(c);
   mealOptions_(settingsNow).forEach(function (opt) {
@@ -1968,8 +2012,13 @@ function setupSheets_(c) {
   rows.push(['Album emailed (addresses)', entries(COL.albumSent, ',')]);
   summary.getRange(1, 1, rows.length, 2).setValues(rows);
   summary.getRange(1, 1).setFontSize(18).setFontWeight('bold').setFontColor('#15322a');
-  summary.getRange(14, 1, 4, 2).setFontWeight('bold').setBackground('#f9e9eb');
-  summary.setColumnWidth(1, 320);
+  sectionHeads.forEach(function (r) {
+    summary.getRange(r, 1, 1, 2).setFontWeight('bold').setFontColor('#f9e9eb').setBackground('#15322a');
+  });
+  highlights.forEach(function (r) {
+    summary.getRange(r, 1, 1, 2).setFontWeight('bold').setBackground('#f9e9eb');
+  });
+  summary.setColumnWidth(1, 420);
   summary.setColumnWidth(2, 120);
 
   // RSVP log

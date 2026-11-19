@@ -37,6 +37,82 @@ function setup({ guests = GUESTS, settings = SETTINGS, ...opts } = {}) {
 const rsvp = (env, i, attendance, plusOne) =>
   apiPost(env, { action: 'rsvp', code: env.code(i), attendance, ...(plusOne ? { plusOne } : {}) });
 
+// Works out the Summary tab's numbers the way Google Sheets would, for the handful of formula
+// shapes the Summary uses (COUNTA, SUM, COUNTIF(S), SUMIF(S), the comma-counting SUMPRODUCT,
+// references to other Summary cells, and + / -). Returns { label: number }.
+function summaryValues(env) {
+  const sheets = {};
+  const column = (sheetName, letter) => {
+    if (!sheets[sheetName]) sheets[sheetName] = env.ss.getSheetByName(sheetName).rows();
+    let idx = 0;
+    for (const ch of letter) idx = idx * 26 + (ch.charCodeAt(0) - 64);
+    return sheets[sheetName].slice(1).map((r) => r[idx - 1]);
+  };
+  const range = (ref) => {
+    const m = ref.trim().match(/^'((?:[^']|'')+)'!([A-Z]+)2:\2$/);
+    if (!m) throw new Error(`Unexpected range: ${ref}`);
+    return column(m[1].replace(/''/g, "'"), m[2]);
+  };
+  const crit = (s) => s.trim().replace(/^"|"$/g, '').toLowerCase();
+  const matches = (v, c) => String(v ?? '').trim().toLowerCase() === c;
+  const num = (v) => (typeof v === 'number' ? v : Number(v) || 0);
+  function args(inner) {
+    const out = []; let depth = 0, quoted = false, cur = '';
+    for (const ch of inner) {
+      if (ch === '"') quoted = !quoted;
+      if (!quoted && ch === '(') depth++;
+      if (!quoted && ch === ')') depth--;
+      if (!quoted && depth === 0 && ch === ',') { out.push(cur); cur = ''; } else cur += ch;
+    }
+    return out.concat(cur);
+  }
+  const summary = env.ss.getSheetByName('Summary');
+  const rows = summary.rows();
+  const cache = {};
+  function cell(r) {
+    if (r in cache) return cache[r];
+    const f = summary.getRange(r, 2).getFormula();
+    return (cache[r] = f ? evaluate(f.slice(1)) : num(rows[r - 1][1]));
+  }
+  function term(t) {
+    t = t.trim();
+    let m;
+    if ((m = t.match(/^B(\d+)$/))) return cell(Number(m[1]));
+    if ((m = t.match(/^SUMPRODUCT\(\(LEN\(TRIM\((.+?)\)\)>0\)\*\(LEN\(\1\)-LEN\(SUBSTITUTE\(\1,"(.)",""\)\)\+1\)\)$/))) {
+      return range(m[1]).reduce((n, v) => n + (String(v ?? '').trim() ? String(v).split(m[2]).length : 0), 0);
+    }
+    if (!(m = t.match(/^([A-Z]+)\((.*)\)$/))) throw new Error(`Unexpected formula part: ${t}`);
+    const a = args(m[2]);
+    const pairs = (list) => { const out = []; for (let i = 0; i < list.length; i += 2) out.push([range(list[i]), crit(list[i + 1])]); return out; };
+    const ok = (conds, i) => conds.every(([vals, c]) => matches(vals[i], c));
+    switch (m[1]) {
+      case 'COUNTA': return range(a[0]).filter((v) => String(v ?? '').trim() !== '').length;
+      case 'SUM': return range(a[0]).reduce((n, v) => n + num(v), 0);
+      case 'COUNTIF': case 'COUNTIFS': { const conds = pairs(a); return conds[0][0].filter((_, i) => ok(conds, i)).length; }
+      case 'SUMIF': { const vals = range(a[0]), c = crit(a[1]), sums = range(a[2]); return sums.reduce((n, v, i) => n + (matches(vals[i], c) ? num(v) : 0), 0); }
+      case 'SUMIFS': { const sums = range(a[0]), conds = pairs(a.slice(1)); return sums.reduce((n, v, i) => n + (ok(conds, i) ? num(v) : 0), 0); }
+      default: throw new Error(`Unsupported function: ${m[1]}`);
+    }
+  }
+  function evaluate(expr) {
+    // Split on top-level + and - (outside quotes and parentheses).
+    let depth = 0, quoted = false, cur = '', sign = 1, total = 0;
+    for (const ch of expr) {
+      if (ch === '"') quoted = !quoted;
+      if (!quoted && ch === '(') depth++;
+      if (!quoted && ch === ')') depth--;
+      if (!quoted && depth === 0 && (ch === '+' || ch === '-') && cur.trim()) { total += sign * term(cur); sign = ch === '+' ? 1 : -1; cur = ''; } else cur += ch;
+    }
+    return total + sign * term(cur);
+  }
+  const out = {};
+  rows.forEach((r, i) => { if (r[0] && summary.getRange(i + 1, 2).getFormula()) { try { out[r[0]] = cell(i + 1); } catch (err) { /* formula shapes this helper doesn't cover */ } } });
+  return out;
+}
+
+const eventCounts = (values, ev) => Object.fromEntries(Object.entries(values)
+  .filter(([k]) => k.startsWith(`${ev}: `)).map(([k, v]) => [k.slice(ev.length + 2), v]));
+
 /* ------------------------------------------------------------------ */
 describe('sheet setup', () => {
   test('creates all tabs with the expected headers and removes the blank Sheet1', () => {
@@ -99,6 +175,48 @@ describe('sheet setup', () => {
     assert.equal(formulas['Plus ones not coming'], `=COUNTIF('Guests'!L2:L,"Not bringing a guest")`);
     assert.equal(summary.getRange(3, 1).getValue(), 'Households invited');
     assert.equal(summary.getRange(10, 1).getValue(), 'Households responded');
+  });
+
+  test('the Summary counts the ceremony and the reception separately, with who is still waiting', () => {
+    const env = setup();
+    // Smiths and Carol (Wedding + Reception) answer; the Browns and Gina (Ceremony Only) haven't yet.
+    rsvp(env, 0, { ceremony: ['Alice Smith', 'Bob Smith'], reception: ['Alice Smith'] });
+    rsvp(env, 1, { ceremony: ['Carol Jones'], reception: ['Carol Jones'] }, { name: 'Plus Person', ceremony: true, reception: true });
+    const value = summaryValues(env);
+    assert.deepEqual(eventCounts(value, 'Ceremony'), {
+      'households invited': 4, 'people invited (not counting plus ones)': 7, 'plus ones offered': 2,
+      'most possible (everyone invited + every plus one)': 9,
+      'attending (people, incl. plus ones)': 4, 'declined (people)': 0,
+      'households still waiting on': 2, 'people still waiting on (not counting plus ones)': 4, 'plus ones still waiting on': 1,
+      'total if everyone still waiting says yes': 9,
+    });
+    assert.deepEqual(eventCounts(value, 'Reception'), {
+      'households invited': 2, 'people invited (not counting plus ones)': 3, 'plus ones offered': 1,
+      'most possible (everyone invited + every plus one)': 4,
+      'attending (people, incl. plus ones)': 3, 'declined (people)': 1,
+      'households still waiting on': 0, 'people still waiting on (not counting plus ones)': 0, 'plus ones still waiting on': 0,
+      'total if everyone still waiting says yes': 3,
+    });
+    // The Browns say no: the ceremony's best case shrinks, the reception's doesn't change.
+    rsvp(env, 2, { ceremony: [] });
+    const after = summaryValues(env);
+    const cer = eventCounts(after, 'Ceremony');
+    assert.equal(cer['declined (people)'], 3);
+    assert.equal(cer['households still waiting on'], 1);
+    assert.equal(cer['people still waiting on (not counting plus ones)'], 1);
+    assert.equal(cer['total if everyone still waiting says yes'], 6);
+    assert.equal(eventCounts(after, 'Reception')['total if everyone still waiting says yes'], 3);
+    // Every invited person is attending, declined or still waiting: nobody is counted twice or missed.
+    for (const ev of ['Ceremony', 'Reception']) {
+      const n = eventCounts(after, ev);
+      const plusOnesComing = 1; // Carol's guest, at both
+      assert.equal(n['attending (people, incl. plus ones)'] - plusOnesComing + n['declined (people)'] + n['people still waiting on (not counting plus ones)'],
+        n['people invited (not counting plus ones)'], ev);
+    }
+    // The section headings are there, and the old rows other tabs rely on are unchanged.
+    const labels = env.ss.getSheetByName('Summary').rows().map((r) => r[0]);
+    assert.ok(labels.includes('CEREMONY') && labels.includes('RECEPTION'));
+    assert.equal(after['Households waiting on'], 1); // just Gina
   });
 
   test('summary "people" formula counts comma-separated names', () => {
@@ -1209,11 +1327,9 @@ describe('declined columns and counts', () => {
     const count = (col) => env.sheet.objects().reduce((n, r) => n + (String(r[col]).trim() ? String(r[col]).split(',').length : 0), 0);
     assert.equal(count('Ceremony Declined'), 4); // Alice + the three Browns
     assert.equal(count('Reception Declined'), 2); // Alice + Bob
-    const labels = env.ss.getSheetByName('Summary').rows().map((r) => r[0]);
-    assert.deepEqual(labels.slice(13, 17), [
-      'Ceremony: attending (people, incl. plus ones)', 'Ceremony: declined (people)',
-      'Reception: attending (people, incl. plus ones)', 'Reception: declined (people)',
-    ]);
+    const value = summaryValues(env);
+    assert.equal(value['Ceremony: declined (people)'], 4);
+    assert.equal(value['Reception: declined (people)'], 2);
   });
 });
 
