@@ -49,6 +49,7 @@ On the **Settings** tab:
 
 - **Site URL**: your website address, for example `https://stephanieandrobert.com`. No slash at the end. Use the `https://<username>.github.io/<repo>` address until the domain is set up.
 - **RSVP Deadline**: a date like `YYYY-MM-DD`. Guests can RSVP or change their answer through the end of that day. Leave it blank for no deadline.
+- **RSVP Deadline (Ceremony Only)**: optional. A different last day for "Ceremony Only" households, for example a week later than the reception guests (who need an earlier count for the caterer). Their invitation, text message and emails all show this date instead. Leave it blank and they use **RSVP Deadline**.
 - **Ceremony Date / Time / Venue / Address** and **Reception Time / Venue / Address**: shown in the details under the invitation card (with a "Get directions" link), in emails, and as `{date}` in texts. Reception details are only ever sent to *Wedding + Reception* guests. To show a time over several lines, for example `Mocktails & Appetizers 6:00 PM` and then `Dinner Reception 7:00 PM`, put ` / ` between them or press Ctrl+Enter (⌘+Enter on a Mac) inside the cell.
 - **The invitation cards.** Each guest sees the card for their invite type, wrapped in an envelope they tap to open. Type the wording normally; the cards add the capitals and script lettering. Put ` / ` (space, slash, space) wherever a new line should start.
   - Both cards: **Invitation Date & Time** (the date and time in words, as three lines) and **Invitation Location**.

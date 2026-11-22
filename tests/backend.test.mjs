@@ -755,6 +755,36 @@ describe('RSVP deadline', () => {
     const env = setup({ settings: { ...SETTINGS, 'RSVP Deadline': '2001-01-01' } });
     assert.equal(rsvp(env, 0, { ceremony: [] }).error, 'closed');
   });
+
+  test('"Ceremony Only" households can have their own, later deadline', () => {
+    const env = setup({ settings: { ...SETTINGS, 'RSVP Deadline': '2099-11-22', 'RSVP Deadline (Ceremony Only)': '2099-11-28' } });
+    const full = env.code(0); // the Smiths: Wedding + Reception
+    const cer = env.code(2); // the Browns: Ceremony Only
+    // Each invitation shows its own date.
+    assert.equal(env.gs.handleGet_(env.c, { code: full }, at('2099-11-01T12:00:00Z')).rsvp.deadlineText, 'November 22, 2099');
+    assert.equal(env.gs.handleGet_(env.c, { code: cer }, at('2099-11-01T12:00:00Z')).rsvp.deadlineText, 'November 28, 2099');
+    // So does each household's ready-to-send text, and the invitation email.
+    assert.match(env.row(0)['Text Message'], /by November 22, 2099/);
+    assert.match(env.row(2)['Text Message'], /by November 28, 2099/);
+    const t = env.gs.readGuests_(env.c);
+    assert.match(env.gs.buildInviteEmail_(t.guests[2], env.gs.readSettings_(env.c), 'invite').body, /RSVP by November 28, 2099/);
+    assert.match(env.gs.buildInviteEmail_(t.guests[0], env.gs.readSettings_(env.c), 'invite').body, /RSVP by November 22, 2099/);
+    // On Nov 25, the reception households are closed but ceremony-only ones can still answer.
+    const nov25 = at('2099-11-25T12:00:00Z');
+    assert.throws(() => env.gs.submitRsvp_(env.c, { action: 'rsvp', code: full, attendance: { ceremony: [], reception: [] } }, nov25), (e) => e.code === 'closed');
+    assert.doesNotThrow(() => env.gs.submitRsvp_(env.c, { action: 'rsvp', code: cer, attendance: { ceremony: ['Dan Brown'] } }, nov25));
+    // After Nov 28, everyone is closed.
+    assert.throws(() => env.gs.submitRsvp_(env.c, { action: 'rsvp', code: cer, attendance: { ceremony: [] } }, at('2099-11-29T17:00:00Z')), (e) => e.code === 'closed' && /November 28, 2099/.test(e.message));
+  });
+
+  test('with no ceremony-only deadline, everyone uses the RSVP Deadline', () => {
+    const env = setup({ settings: { ...SETTINGS, 'RSVP Deadline': '2099-11-22' } });
+    assert.equal(apiGet(env, { code: env.code(2) }).data.rsvp.deadline, '2099-11-22');
+    assert.match(env.row(2)['Text Message'], /by November 22, 2099/);
+    // And a ceremony-only deadline that isn't a date is reported by the guest list check.
+    setSettings(env, { 'RSVP Deadline (Ceremony Only)': 'the 28th' });
+    assert.match(env.gs.validateGuestList_(env.c).join('\n'), /RSVP Deadline \(Ceremony Only\)" is not a date/);
+  });
 });
 
 /* ------------------------------------------------------------------ */

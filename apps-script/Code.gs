@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '2.3.0';
+var VERSION = '2.4.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -136,6 +136,7 @@ var TEXT_TEMPLATE_DEFAULT = "Hi {first names}! We're getting married and would l
 var SETTINGS_DEFAULTS = [
   ['Site URL', 'https://example.com', 'Your website address, no slash at the end. Invite links are built from this.'],
   ['RSVP Deadline', '', 'Last day guests can RSVP or change their answer. Leave blank for no deadline.'],
+  ['RSVP Deadline (Ceremony Only)', '', 'A different last day for "Ceremony Only" households. Blank = they use the RSVP Deadline above.'],
   ['Ceremony Date', '', 'For example: Saturday, June 6, 2099. Shown under the invitation, in emails and as {date} in texts.'],
   ['Ceremony Time', '', 'For example: 2:00 PM'],
   ['Ceremony Venue', '', ''],
@@ -542,8 +543,13 @@ function dateKeyText_(key) {
   return MONTHS_[Number(p[1]) - 1] + ' ' + Number(p[2]) + ', ' + p[0];
 }
 
-function rsvpInfo_(settings, now) {
-  return deadlineInfo_(settings, 'RSVP Deadline', now);
+// "Ceremony Only" households can have their own deadline; everyone else uses "RSVP Deadline".
+function rsvpDeadlineSetting_(settings, type) {
+  return type === 'ceremony' && dateKey_(settings['RSVP Deadline (Ceremony Only)']) ? 'RSVP Deadline (Ceremony Only)' : 'RSVP Deadline';
+}
+
+function rsvpInfo_(settings, now, type) {
+  return deadlineInfo_(settings, rsvpDeadlineSetting_(settings, type), now);
 }
 
 function deadlineInfo_(settings, setting, now) {
@@ -666,7 +672,7 @@ function invitePayload_(g, settings, now) {
     invitation: invitation_(g.type, settings),
     events: events_(g.type, settings),
     response: response,
-    rsvp: rsvpInfo_(settings, now)
+    rsvp: rsvpInfo_(settings, now, g.type)
   };
 }
 
@@ -695,7 +701,7 @@ function submitRsvp_(c, body, now) {
     var settings = readSettings_(c);
     var table = readGuests_(c);
     var g = lookupGuest_(table, body.code, now);
-    var rsvp = rsvpInfo_(settings, now);
+    var rsvp = rsvpInfo_(settings, now, g.type);
     if (!rsvp.open) {
       fail_('closed', 'RSVPs closed on ' + rsvp.deadlineText + '. Please contact Stephanie or Robert directly.');
     }
@@ -1522,7 +1528,7 @@ function firstNames_(entries) {
 function textMessage_(g, settings) {
   if (!g.code || !g.type || !g.names.length) return '';
   var template = String(setting_(settings, 'Text Message')) || TEXT_TEMPLATE_DEFAULT;
-  var deadline = dateKey_(settings['RSVP Deadline']);
+  var deadline = dateKey_(settings[rsvpDeadlineSetting_(settings, g.type)]);
   var values = {
     'first names': firstNames_(g.entries && g.entries.length ? g.entries : g.names),
     'names': addressee_(g),
@@ -1663,8 +1669,10 @@ function validateGuestList_(c) {
   });
 
   if (/example\.com/.test(String(setting_(settings, 'Site URL')))) problems.push('Settings: "Site URL" is still the example address.');
-  var deadline = settings['RSVP Deadline'];
-  if (deadline !== '' && deadline !== null && !dateKey_(deadline)) problems.push('Settings: "RSVP Deadline" is not a date (use YYYY-MM-DD, e.g. 2099-01-31).');
+  ['RSVP Deadline', 'RSVP Deadline (Ceremony Only)'].forEach(function (name) {
+    var deadline = settings[name];
+    if (deadline !== '' && deadline !== null && deadline !== undefined && !dateKey_(deadline)) problems.push('Settings: "' + name + '" is not a date (use YYYY-MM-DD, e.g. 2099-01-31).');
+  });
   return problems;
 }
 
@@ -1691,7 +1699,7 @@ function emailButton_(href, label) {
 
 function buildInviteEmail_(g, settings, kind) {
   var link = inviteLink_(settings, g.code);
-  var rsvp = rsvpInfo_(settings, new Date());
+  var rsvp = rsvpInfo_(settings, new Date(), g.type);
   var greeting = addressee_(g);
   var what = g.type === 'full' ? 'our wedding ceremony and the reception to follow' : 'our wedding ceremony';
   var date = setting_(settings, 'Ceremony Date');
