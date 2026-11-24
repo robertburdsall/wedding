@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '3.0.0';
+var VERSION = '3.0.1';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -2469,6 +2469,7 @@ function onOpen() {
     .addItem('Show photo sharing links', 'menuPhotoLinks')
     .addItem('Email camera links now', 'menuSendCameraEmails')
     .addItem('Email a test camera link to myself', 'menuSendTestCameraEmail')
+    .addItem('Email test camera emails to…', 'menuSendTestCameraEmails')
     .addItem('Publish the photo album (and email it)', 'menuPublishAlbum')
     .addSeparator()
     .addItem('Mark selected rows as invited (texted)', 'menuMarkTexted')
@@ -2530,6 +2531,49 @@ function menuSendCameraEmails() {
   var r = sendCameraEmails_(c);
   ui_().alert('Sent ' + r.emails + ' email' + (r.emails === 1 ? '' : 's') + ' (' + r.people + ' guest' + (r.people === 1 ? '' : 's') + ').' +
     (r.quotaHit ? '\n\nYou reached the daily email limit. The rest go out automatically tomorrow morning.' : ''));
+}
+
+// Sends the real camera email (the one that goes out before the wedding) to the addresses you
+// type, as a test. An address that's in someone's Guest Emails gets exactly that guest's email,
+// with their own camera links; any other address gets it with the shared photo page link.
+// Nothing is marked in "Camera Emails Sent", so guests still get theirs on the day.
+function sendTestCameraEmails_(c, addresses) {
+  var settings = readSettings_(c);
+  ensurePhotoSettings_(c, settings);
+  var table = readGuests_(c);
+  var seen = [];
+  var results = [];
+  splitEmails_(addresses).map(cleanEmail_).forEach(function (email) {
+    if (!isEmail_(email) || seen.indexOf(email) >= 0) return;
+    seen.push(email);
+    var people = [];
+    table.guests.forEach(function (g) {
+      if (!g.code || g.type !== 'full') return;
+      receptionEmails_(g).forEach(function (e) {
+        if (cleanEmail_(e.email) === email) people.push({ name: e.name, link: cameraLink_(settings, g.code, e.name) });
+      });
+    });
+    var guests = people.map(function (p) { return p.name; });
+    if (!people.length) people = [{ name: 'Test Guest', link: cameraLink_(settings) }];
+    sendMail_(email, buildCameraEmail_(people, settings), settings);
+    results.push({ email: email, names: guests });
+  });
+  return results;
+}
+
+function menuSendTestCameraEmails() {
+  var ui = ui_();
+  var answer = ui.prompt('Email test camera emails',
+    'Which addresses? (Separate them with commas.)\n\nEach one gets the same camera email guests get before the wedding. ' +
+    'If an address is in someone\'s Guest Emails, it gets their real email with their own camera link, so photos taken with it count as theirs ' +
+    '(tick Hidden or delete those rows afterwards). It isn\'t marked as sent, so they still get it on the day.', ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  var c = ctx_();
+  var results = sendTestCameraEmails_(c, answer.getResponseText());
+  if (!results.length) { ui.alert('No email addresses found in what you typed.'); return; }
+  ui.alert('Sent ' + results.length + ' test camera email' + (results.length === 1 ? '' : 's') + ':\n\n' + results.map(function (r) {
+    return r.email + (r.names.length ? ' (' + r.names.join(', ') + '\'s camera)' : ' (not on the guest list, so the shared photo page link)');
+  }).join('\n'));
 }
 
 function menuSendTestCameraEmail() {

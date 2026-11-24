@@ -202,7 +202,7 @@ The slideshow shows photos only.
 - **Emails come from the meal page.** Each person picking a dinner can add their email. Addresses fill in the **Guest Emails** column ("Name: email; …"). They're optional, and the meal page nudges anyone who left one out.
 - **Each reception guest gets their own camera link** (`…/photos/?t=CODE&me=…`). It greets them by name, puts their name on their photos, and counts their shots against **Photos Per Person** (50) and **Videos Per Person** (10). Opening it once also makes the table QR code open the same camera on that phone. Someone who only scans a table card gets their own 50 and 10, counted per phone.
 - **The links are emailed automatically** **Camera Email Days Before** (3) the **Ceremony Date**, around 9 AM. One email goes to each address, so a couple sharing an address gets one email with a button for each of them. Anyone who adds their email after that day gets theirs right away, and no one gets it twice. Sent addresses are listed in **Camera Emails Sent**.
-- To check how it looks, use **💌 Wedding → Email a test camera link to myself**. To send early, use **💌 Wedding → Email camera links now**.
+- To check how it looks, use **💌 Wedding → Email a test camera link to myself**, or **💌 Wedding → Email test camera emails to…** and type a few addresses. An address that's in someone's Guest Emails gets exactly the email that guest will get, with their own camera link (photos taken with it count as theirs, so tick **Hidden** or delete those rows afterwards). Test emails aren't marked as sent, so guests still get theirs on the day. To send the real ones early, use **💌 Wedding → Email camera links now**.
 - Ceremony-only guests don't get a camera.
 
 ### After the wedding: publish the album

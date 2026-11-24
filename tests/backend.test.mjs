@@ -2182,6 +2182,32 @@ describe('reception guests: emails, personal cameras and the album', () => {
     assert.ok(!env.mail.sent.some((m) => /dan/i.test(m.to)));
   });
 
+  test('test camera emails are the real email, sent to the addresses typed, and not marked as sent', () => {
+    const env = ready();
+    saveMeals(env, 0, ALL_FISH, { 'Alice Smith': 'smiths@example.com', 'Bob Smith': 'smiths@example.com' });
+    // Cancelling sends nothing.
+    env.gs.menuSendTestCameraEmails();
+    assert.equal(env.mail.sent.length, 0);
+    env.ui.nextPrompt = { button: 'OK', text: ' Smiths@Example.com, stranger@example.com; smiths@example.com, not-an-email ' };
+    env.gs.menuSendTestCameraEmails();
+    assert.deepEqual(env.mail.sent.map((m) => m.to), ['smiths@example.com', 'stranger@example.com']);
+    const [smiths, stranger] = env.mail.sent;
+    // Exactly what the Smiths get before the wedding: same subject, both personal cameras.
+    const real = env.gs.buildCameraEmail_(['Alice Smith', 'Bob Smith'].map((n) => ({ name: n, link: env.gs.cameraLink_(env.gs.readSettings_(env.c), env.code(0), n) })), env.gs.readSettings_(env.c));
+    assert.equal(smiths.subject, 'Your camera for our wedding');
+    assert.equal(smiths.htmlBody, real.html);
+    assert.ok(smiths.htmlBody.includes(`me=${me(env, 0, 'Alice Smith')}`));
+    // Someone not on the list gets the shared photo page.
+    assert.ok(stranger.htmlBody.includes(`/photos/?t=${photoCode(env)}"`));
+    assert.ok(!stranger.htmlBody.includes('me='));
+    assert.match(env.ui.alerts.at(-1), /smiths@example\.com \(Alice Smith, Bob Smith's camera\)/);
+    // Not marked as sent, so the real one still goes out on the day.
+    assert.equal(env.row(0)['Camera Emails Sent'], '');
+    assert.equal(env.gs.sendCameraEmails_(env.c).emails, 1);
+    env.gs.onOpen();
+    assert.ok(env.ui.menus.at(-1).items.some(([, fn]) => fn === 'menuSendTestCameraEmails'));
+  });
+
   test('camera emails stop at the daily limit and pick up where they left off', () => {
     const env = ready();
     saveMeals(env, 0, ALL_FISH, { 'Alice Smith': 'alice@example.com', 'Bob Smith': 'bob@example.com' });

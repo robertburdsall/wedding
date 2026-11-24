@@ -273,6 +273,13 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
       flush: () => {},
       getUi: () => ({
         alert: (msg, buttons) => { ui.alerts.push(msg); return buttons ? ui.nextAnswer : 'OK'; },
+        // ui.nextPrompt = { button: 'OK', text: '...' } sets the answer to the next prompt.
+        prompt: (title, msg) => {
+          ui.prompts = (ui.prompts || []).concat([[title, msg]]);
+          const a = ui.nextPrompt || { button: 'CANCEL', text: '' };
+          ui.nextPrompt = null;
+          return { getSelectedButton: () => a.button, getResponseText: () => a.text };
+        },
         createMenu: (name) => {
           const menu = { name, items: [] };
           ui.menus.push(menu);
