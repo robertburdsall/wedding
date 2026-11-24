@@ -153,19 +153,21 @@ Every *Wedding + Reception* household also gets a **Meal Link** (`yourdomain.com
 
 ## Photo sharing at the reception
 
-Reception guests take photos with their own camera link (emailed to them) or by scanning the QR code on their table, with no app needed. **Nobody sees anyone else's photos until you publish the album.** Until then each guest only sees the photos they took themselves. You review everything on the Photos tab, hide what you don't want, and publish. Then everyone gets the album.
+Reception guests take photos and record short videos with their own camera link (emailed to them) or by scanning the QR code on their table, with no app needed. They can add a filter (Warm, Film, B&W, Soft, Vivid, Cool, Vintage), but the file saved is always the original: only the filter's name is kept, and you can change or clear it later. **Nobody sees anyone else's photos until you publish the album.** Until then each guest only sees the photos they took themselves. You review everything on the Photos tab, hide what you don't want, and publish. Then everyone gets the album.
 
 **Where things go**
 
 - Photos are saved to a Google Drive folder, made automatically the first time you run **Set up sheets** (called *Stephanie & Robert — Wedding Photos*). After the wedding, right-click the folder → **Download** to keep them all.
-- Each photo gets a row on the **Photos** tab: when it was taken, who shared it (if they typed a name), their note, their table and a small preview.
-- **To leave a photo out of the album,** tick **Hidden** on its row. The file stays in your folder until you publish, when it moves to a separate private folder.
+- Each photo and video gets a row on the **Photos** tab: when it was taken, who shared it (if they typed a name), their note, their table, a small preview, **Type** (Photo or Video), **Filter** and, for videos, **Seconds**.
+- **To leave one out of the album,** tick **Hidden** on its row. The file stays in your folder until you publish, when it moves to a separate private folder.
+- **To change a filter,** type a different one in the **Filter** column (Warm, Film, B&W, Soft, Vivid, Cool or Vintage), or clear it to show the original.
 - Phones shrink photos to 3000 pixels on the long side before uploading, which keeps uploads quick on venue signal and is still plenty for prints. This also strips location data.
-- Photos only. Videos are skipped with a short note to the guest.
+- **Videos are recorded right on the page** (tap **Record a video**), up to **Video Seconds** (30) each at 720p, about 10 MB. They go up in 2 MB pieces, so a weak signal only resends the piece that dropped. iPhones save MP4; some Android phones save WebM, which Google Drive plays in its own player. Each video also gets a still for the album grid, kept in a separate "(video stills)" folder so it isn't in the album download.
+- Videos from the camera roll can't be added (they're often huge and in 4K). Guests are told to record one on the page instead.
 
 **Who can see the photos**
 
-Before you publish the album: only the two of you (on the Photos tab and in the Drive folder) and the guest who took each photo. The camera page never sends a guest anyone else's photos, and the slideshow stays on a waiting screen. Each photo file is shared as "anyone with the link" so the Photos tab can show its preview, but those links are only ever handed to the guest who took it.
+Before you publish the album: only the two of you (on the Photos tab, in the Drive folder, and in the highlight builder) and the guest who took each photo or video. The camera page never sends a guest anyone else's photos, and the slideshow stays on a waiting screen. Each file is shared as "anyone with the link" so the Photos tab can show its preview, but those links are only ever handed to the guest who took it.
 
 After you publish: everyone with the **Photo Code** (printed on the table cards) or an album email, minus the photos you hid. The photo pages aren't linked from the main website and search engines are told to ignore them. To shut out an old code (say, a test card you printed), clear **Photo Code** on Settings and a new one is made. Then print the cards again.
 
@@ -176,22 +178,29 @@ After you publish: everyone with the **Photo Code** (printed on the table cards)
 | Photo Code | The secret code on the cards. Filled in automatically. |
 | Photo Uploads Until | Last day guests can add photos, for example two weeks after the wedding. Blank = no end (sharing also closes when you publish the album). |
 | Photo Folder | Filled in automatically. Paste a link to a different Drive folder of yours if you'd rather use your own. |
-| Photos Per Person | How many photos each camera can share (20). Blank = no limit. |
+| Photos Per Person | How many photos each camera can share (50). Blank = no limit. |
+| Videos Per Person | How many videos each camera can record (10). 0 = no videos; blank = no limit. |
+| Video Seconds | The longest a video can be (30 seconds; 5 to 120). |
+| Review Code, Highlight Builder Link | Filled in automatically. The builder link is just for you two; don't share it. Clear **Review Code** to get a new one. |
+| Highlight Video | Filled in when you save a highlight from the builder: the link to send. |
+| Video Stills Folder | Filled in automatically. |
 | Camera Email Days Before | When to email reception guests their camera links: this many days before the Ceremony Date (3). Blank = only when you use the menu. |
 | Camera Email Subject, Album Email Subject | The subject lines of those emails. |
 | Photo Album Published, Photos Left Out Folder | Filled in when you publish the album. |
 | Photo Page Link, Photo Slideshow Link, Photo Table Cards Link | Filled in automatically. Also shown by **💌 Wedding → Show photo sharing links**. |
 
+The slideshow shows photos only.
+
 **Before the wedding**
 
 1. Open the **Photo Table Cards Link** on a computer. Set the number of tables and print (two 5×7 cards per letter page, landscape). Cut along the dashed lines.
-2. Test it: scan a card with your phone, share a couple of photos, and check they show on your phone under "from you" and on the Photos tab. Then tick **Hidden** on the test photos.
+2. Test it: scan a card with your phone, share a couple of photos and record a short video, and check they show on your phone under "from you" and on the Photos tab. Try it on an iPhone and an Android phone if you can. Then tick **Hidden** on the test ones.
 3. The **Photo Slideshow Link** shows the album on a TV or projector, but only after you publish it (handy for a get-together after the wedding). Click once for full screen.
 
 ### Personal cameras for reception guests
 
 - **Emails come from the meal page.** Each person picking a dinner can add their email. Addresses fill in the **Guest Emails** column ("Name: email; …"). They're optional, and the meal page nudges anyone who left one out.
-- **Each reception guest gets their own camera link** (`…/photos/?t=CODE&me=…`). It greets them by name, puts their name on their photos, and counts their shots against **Photos Per Person** (20). Opening it once also makes the table QR code open the same camera on that phone. Someone who only scans a table card gets their own 20, counted per phone.
+- **Each reception guest gets their own camera link** (`…/photos/?t=CODE&me=…`). It greets them by name, puts their name on their photos, and counts their shots against **Photos Per Person** (50) and **Videos Per Person** (10). Opening it once also makes the table QR code open the same camera on that phone. Someone who only scans a table card gets their own 50 and 10, counted per phone.
 - **The links are emailed automatically** **Camera Email Days Before** (3) the **Ceremony Date**, around 9 AM. One email goes to each address, so a couple sharing an address gets one email with a button for each of them. Anyone who adds their email after that day gets theirs right away, and no one gets it twice. Sent addresses are listed in **Camera Emails Sent**.
 - To check how it looks, use **💌 Wedding → Email a test camera link to myself**. To send early, use **💌 Wedding → Email camera links now**.
 - Ceremony-only guests don't get a camera.
@@ -204,6 +213,18 @@ After you publish: everyone with the **Photo Code** (printed on the table cards)
 
 Hid something else later? Tick it and publish again: it's taken out of the folder, and no one is emailed twice. To reopen photo sharing, clear **Photo Album Published** on Settings.
 
+### The highlight video (for people who couldn't make it)
+
+You put it together yourselves from the guests' clips and photos; nothing is made automatically.
+
+1. Open the **Highlight Builder Link** from the Settings tab, in **Chrome on a computer**. It lists every photo and video guests shared (tick **Show ones you hid** to include those too).
+2. Click **+ Add** on the ones you want. Select one in the **Running order** to trim it (type the start and end, or pause the video and use **Start/End where it's paused**), pick a different filter or **Original**, or for photos, how many seconds they show. Drag the rows (or use ↑ ↓) to put them in order.
+3. Under **Look & sound**: wide (16:9) or tall (9:16), an opening title, closing words, "Filmed by …" credits, fades, the clips' own sound, and an optional song from your computer (it gets quieter under clips with sound and fades out at the end).
+4. **Preview the highlight** plays it through. **Make the video** plays it once more while it records, so it takes as long as the video itself: keep the tab open and in front until it's done.
+5. Watch the result, then **Download** it, and/or **Save & get a link**. Saving puts it in your photo folder, fills in **Highlight Video** on Settings, and gives you a link anyone can watch without signing in. Once the album is published, the album page shows a **Watch the highlight video** button too.
+
+Your running order is remembered on that computer, so you can come back to it (add the song again after reopening). The guests' original files are never changed.
+
 ## Updating the script later
 
 Whenever a new version of `apps-script/Code.gs` comes along:
@@ -213,7 +234,7 @@ Whenever a new version of `apps-script/Code.gs` comes along:
 3. **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The web app URL stays the same.
 4. Check it's live: open your web app URL with `?action=ping` on the end (for example `https://script.google.com/macros/s/…/exec?action=ping`). It should show the `VERSION` from the top of the new `Code.gs`. If it shows an older number, step 3 didn't take, so try it again.
 
-If [`apps-script/appsscript.json`](apps-script/appsscript.json) changed too, replace that file in the editor as well before step 2. **Set up sheets** then asks you to authorize again. Version 2.0.0 added Google Drive access for photo sharing: Google warns that the script can see your Drive files, but it only ever uses its own photo folder. Version 2.1.0 added permission to run on a schedule, which sends the camera emails 3 days before the wedding. **Set up sheets** installs that daily schedule.
+If [`apps-script/appsscript.json`](apps-script/appsscript.json) changed too, replace that file in the editor as well before step 2. **Set up sheets** then asks you to authorize again. Version 2.0.0 added Google Drive access for photo sharing: Google warns that the script can see your Drive files, but it only ever uses its own photo folder. Version 2.1.0 added permission to run on a schedule, which sends the camera emails 3 days before the wedding. **Set up sheets** installs that daily schedule. Version 3.0.0 added permission to "connect to an external service": that's Google Drive's own upload service, which videos go through in pieces (and the highlight builder reads them back the same way).
 
 ## Security notes
 

@@ -274,6 +274,7 @@ describe('codes and invite links', () => {
     let calls = 0;
     env.gs.randomCode_ = function () {
       calls++;
+      if (!queue.length) return real(); // later codes (like the review code) don't matter here
       const next = queue.shift();
       return /^[0-9]+$/.test(next) ? env.gs.randomCode_() : next; // same rule as the real function
     };
@@ -1797,7 +1798,7 @@ describe('photo sharing', () => {
   test('setup makes a Photos tab, a secret photo code and the photo links', () => {
     const env = setup();
     assert.deepEqual(env.ss.getSheetByName('Photos').rows()[0],
-      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status']);
+      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status', 'Type', 'Filter', 'Seconds', 'Still File ID']);
     const s = env.gs.readSettings_(env.c);
     assert.match(s['Photo Code'], /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
     assert.equal(s['Photo Page Link'], `https://stephanieandrobert.test/photos/?t=${s['Photo Code']}`);
@@ -1874,7 +1875,7 @@ describe('photo sharing', () => {
     assert.equal(photos.length, 1);
     assert.deepEqual(photos[0], {
       id: file.id, w: 3000, h: 2000, takenAt: new Date(now - 3600e3).toISOString(), uploadedAt: row['Uploaded At'].toISOString(),
-      from: 'Aunt Sue', caption: 'First dance!', table: '7',
+      from: 'Aunt Sue', caption: 'First dance!', table: '7', kind: 'photo', filter: '',
     });
     assert.deepEqual(res.data.photo, photos[0]);
   });
@@ -2024,7 +2025,8 @@ describe('photo sharing', () => {
     const summary = env.ss.getSheetByName('Summary');
     const labels = summary.rows().map((r) => r[0]);
     const find = (label) => labels.indexOf(label) + 1;
-    assert.equal(summary.getRange(find('Photos shared'), 2).getFormula(), "=COUNTA('Photos'!I2:I)");
+    assert.equal(summary.getRange(find('Photos shared'), 2).getFormula(), `=COUNTA('Photos'!I2:I)-COUNTIF('Photos'!O2:O,"Video")`);
+    assert.equal(summary.getRange(find('Videos shared'), 2).getFormula(), `=COUNTIF('Photos'!O2:O,"Video")`);
     assert.equal(summary.getRange(find('Photos hidden'), 2).getFormula(), "=COUNTIF('Photos'!F2:F,TRUE)");
   });
 
@@ -2102,7 +2104,7 @@ describe('reception guests: emails, personal cameras and the album', () => {
     assert.match(link, new RegExp(`^https://stephanieandrobert\\.test/photos/\\?t=${photoCode(env)}&me=${env.code(0)}-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$`));
     assert.notEqual(me(env, 0, 'Alice Smith'), me(env, 0, 'Bob Smith'));
     const you = list(env, { me: me(env, 0, 'Alice Smith') }).data.you;
-    assert.deepEqual(you, { limit: 20, used: 0, left: 20, name: 'Alice Smith' });
+    assert.deepEqual(you, { limit: 50, used: 0, left: 50, name: 'Alice Smith', videos: { limit: 10, used: 0, left: 10, seconds: 30 } });
     // Made-up or ceremony-only links are just anonymous.
     assert.equal(list(env, { me: `${env.code(0)}-ZZZZZZ` }).data.you.name, '');
     assert.equal(list(env, { me: me(env, 2, 'Dan Brown') }).data.you.name, '');
@@ -2114,7 +2116,7 @@ describe('reception guests: emails, personal cameras and the album', () => {
     const alice = me(env, 0, 'Alice Smith');
     assert.equal(upload(env, { me: alice }).data.you.left, 1);
     const second = upload(env, { me: alice });
-    assert.deepEqual(second.data.you, { limit: 2, used: 2, left: 0, name: 'Alice Smith' });
+    assert.deepEqual(second.data.you, { limit: 2, used: 2, left: 0, name: 'Alice Smith', videos: { limit: 10, used: 0, left: 10, seconds: 30 } });
     const third = upload(env, { me: alice });
     assert.equal(third.error, 'limit_reached');
     assert.match(third.message, /all 2 of your photos/);
@@ -2130,7 +2132,7 @@ describe('reception guests: emails, personal cameras and the album', () => {
     assert.equal(upload(env, { device: 'phone-aaaaaaaa' }).ok, true);
     assert.equal(upload(env, { device: 'phone-aaaaaaaa' }).error, 'limit_reached');
     assert.equal(upload(env, { device: 'phone-bbbbbbbb' }).ok, true);
-    assert.deepEqual(list(env, { device: 'phone-aaaaaaaa' }).data.you, { limit: 1, used: 1, left: 0, name: '' });
+    assert.deepEqual(list(env, { device: 'phone-aaaaaaaa' }).data.you, { limit: 1, used: 1, left: 0, name: '', videos: { limit: 10, used: 0, left: 10, seconds: 30 } });
     // A blank Photos Per Person means no limit.
     setSettings(env, { 'Photos Per Person': '' });
     assert.equal(upload(env, { device: 'phone-aaaaaaaa' }).ok, true);
@@ -2170,7 +2172,7 @@ describe('reception guests: emails, personal cameras and the album', () => {
     assert.ok(smiths.htmlBody.includes(`me=${me(env, 0, 'Alice Smith')}`));
     assert.ok(smiths.htmlBody.includes(`me=${me(env, 0, 'Bob Smith')}`));
     assert.match(smiths.htmlBody, /OPEN ALICE&#39;S CAMERA/);
-    assert.match(smiths.body, /up to 20 photos each/);
+    assert.match(smiths.body, /up to 50 photos and 10 short videos each/);
     assert.equal(env.row(0)['Camera Emails Sent'], 'smiths@example.com');
     // Running again sends nothing new; a new address gets its own.
     assert.equal(env.gs.sendCameraEmails_(env.c).emails, 0);
@@ -2289,6 +2291,246 @@ describe('reception guests: emails, personal cameras and the album', () => {
     env.gs.onOpen();
     const fns = env.ui.menus.at(-1).items.map(([, fn]) => fn);
     for (const fn of ['menuSendCameraEmails', 'menuSendTestCameraEmail', 'menuPublishAlbum']) assert.ok(fns.includes(fn), fn);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+describe('videos, filters and the highlight builder', () => {
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake still bytes')]).toString('base64');
+  const PIECE = 256 * 1024;
+  const photoCode = (env) => env.gs.readSettings_(env.c)['Photo Code'];
+  const reviewCode = (env) => env.gs.readSettings_(env.c)['Review Code'];
+  const list = (env, extra = {}) => apiGet(env, { action: 'photos', t: photoCode(env), ...extra });
+  const review = (env, k = reviewCode(env)) => apiGet(env, { action: 'review', k });
+  const photoRows = (env) => env.ss.getSheetByName('Photos').objects();
+  // A made-up "video": about 2.3 pieces of patterned bytes.
+  const fakeVideo = (size = Math.round(PIECE * 2.3), seed = 7) => Buffer.from(Array.from({ length: size }, (_, i) => (i * seed + (i >> 8)) & 255));
+
+  // Sends a whole video the way the camera page does: start, pieces, finish.
+  function sendVideo(env, bytes, { code = photoCode(env), k, piece = PIECE, ...extra } = {}) {
+    const auth = k ? { k } : { code };
+    const uploadId = extra.uploadId || `vid-${Math.random().toString(36).slice(2)}`;
+    const start = apiPost(env, { action: 'video', step: 'start', ...auth, uploadId, mime: 'video/mp4', size: bytes.length, seconds: 12, device: 'phone-vvvv-0001', ...extra });
+    if (!start.ok || start.data.complete) return start;
+    let offset = start.data.received;
+    while (offset < bytes.length) {
+      const r = apiPost(env, { action: 'video', step: 'chunk', ...auth, uploadId, offset, data: bytes.subarray(offset, offset + piece).toString('base64') });
+      if (!r.ok) return r;
+      offset = r.data.received;
+    }
+    return apiPost(env, { action: 'video', step: 'finish', ...auth, uploadId, poster: JPEG });
+  }
+
+  test('a guest\'s video goes to Drive in pieces and gets a row, a still and its filter', () => {
+    const env = setup();
+    const bytes = fakeVideo();
+    const res = sendVideo(env, bytes, { from: 'Aunt Sue', caption: 'Cake!', table: '4', filter: 'b&w', width: 720, height: 1280, seconds: 12.4 });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    const video = [...env.drive.files.values()].find((f) => f.contentType === 'video/mp4');
+    assert.ok(video.bytes.equals(bytes), 'the saved video is byte-for-byte what was recorded');
+    const folder = env.drive.folders.get(video.folder);
+    assert.equal(folder.name, 'Stephanie & Robert — Wedding Photos');
+    assert.match(video.name, /^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2} Aunt Sue\.mp4$/);
+    assert.deepEqual(video.sharing, { access: 'ANYONE_WITH_LINK', permission: 'VIEW' });
+    // The still lives in its own folder, so the album download is just photos and videos.
+    const still = [...env.drive.files.values()].find((f) => f.contentType === 'image/jpeg');
+    assert.equal(env.drive.folders.get(still.folder).name, 'Stephanie & Robert — Wedding Photos (video stills)');
+    assert.match(env.gs.readSettings_(env.c)['Video Stills Folder'], /folders\//);
+    const [row] = photoRows(env);
+    assert.equal(row.Type, 'Video');
+    assert.equal(row.Filter, 'B&W');
+    assert.equal(row.Seconds, 12.4);
+    assert.equal(row['Still File ID'], still.id);
+    assert.equal(row['File ID'], video.id);
+    assert.equal(env.ss.getSheetByName('Photos').getRange(2, 7).getFormula(), `=IMAGE("https://drive.google.com/thumbnail?id=${still.id}&sz=w200")`);
+    assert.deepEqual(res.data.photo, {
+      id: video.id, w: 720, h: 1280, takenAt: res.data.photo.takenAt, uploadedAt: res.data.photo.uploadedAt, from: 'Aunt Sue', caption: 'Cake!', table: '4',
+      kind: 'video', filter: 'B&W', seconds: 12.4, poster: still.id,
+    });
+    assert.deepEqual(res.data.you.videos, { limit: 10, used: 1, left: 9, seconds: 30 });
+    assert.equal(res.data.you.used, 0, 'videos don\'t use up photos');
+    // Only that phone sees it before the album is published.
+    assert.equal(list(env, { device: 'phone-vvvv-0001' }).data.photos[0].kind, 'video');
+    assert.deepEqual(list(env, { device: 'phone-zzzz-9999' }).data.photos, []);
+    // Nothing is left in the upload cache.
+    assert.equal([...env.cache.store.keys()].filter((k) => k.startsWith('upload:')).length, 0);
+  });
+
+  test('a piece that already arrived is skipped, a Drive hiccup can be retried, and a lost reply isn\'t saved twice', () => {
+    const env = setup();
+    const bytes = fakeVideo();
+    const uploadId = 'vid-retry-1';
+    const base = { action: 'video', code: photoCode(env), uploadId };
+    assert.equal(apiPost(env, { ...base, step: 'start', mime: 'video/webm;codecs=vp9,opus', size: bytes.length, seconds: 9, device: 'phone-rrrr-0001' }).ok, true);
+    const piece = (offset) => apiPost(env, { ...base, step: 'chunk', offset, data: bytes.subarray(offset, offset + PIECE).toString('base64') });
+    assert.equal(piece(0).data.received, PIECE);
+    // The phone didn't hear back and sends the first piece again: told to carry on from PIECE.
+    assert.deepEqual(piece(0).data, { received: PIECE, complete: false });
+    env.drive.failPieces = 1;
+    assert.equal(piece(PIECE).error, 'upload_failed');
+    assert.equal(piece(PIECE).data.received, 2 * PIECE);
+    assert.deepEqual(piece(2 * PIECE).data, { received: bytes.length, complete: true });
+    const done = apiPost(env, { ...base, step: 'finish', poster: JPEG });
+    assert.equal(done.ok, true, JSON.stringify(done));
+    // The reply to "finish" got lost, so the phone sends it again (or starts over).
+    assert.equal(apiPost(env, { ...base, step: 'finish', poster: JPEG }).data.duplicate, true);
+    assert.equal(apiPost(env, { ...base, step: 'start', mime: 'video/webm', size: bytes.length, device: 'phone-rrrr-0001' }).data.duplicate, true);
+    assert.equal(photoRows(env).length, 1);
+    const video = env.drive.files.get(done.data.photo.id);
+    assert.equal(video.contentType, 'video/webm');
+    assert.ok(video.bytes.equals(bytes));
+    // Every Drive call sent the script's own login, and none followed the 308 as a redirect.
+    assert.ok(env.drive.fetches.every((f) => f.headers.Authorization === 'Bearer mock-oauth-token'));
+  });
+
+  test('an upload that waited too long starts over cleanly', () => {
+    const env = setup();
+    const bytes = fakeVideo(PIECE + 10);
+    const base = { action: 'video', code: photoCode(env), uploadId: 'vid-slow-1' };
+    apiPost(env, { ...base, step: 'start', mime: 'video/mp4', size: bytes.length, device: 'phone-ssss-0001' });
+    env.cache.advance(7 * 3600e3);
+    const r = apiPost(env, { ...base, step: 'chunk', offset: 0, data: bytes.subarray(0, PIECE).toString('base64') });
+    assert.equal(r.error, 'upload_expired');
+    assert.equal(sendVideo(env, bytes, { uploadId: 'vid-slow-1', device: 'phone-ssss-0001' }).ok, true);
+  });
+
+  test('videos have their own allowance, length limit and file checks', () => {
+    const env = setup({ settings: { ...SETTINGS, 'Videos Per Person': 1, 'Photos Per Person': 1, 'Video Seconds': 20 } });
+    const small = fakeVideo(1000);
+    assert.equal(sendVideo(env, small).ok, true);
+    const second = sendVideo(env, small);
+    assert.equal(second.error, 'limit_reached');
+    assert.match(second.message, /all 1 of your videos/);
+    // Photos are counted separately.
+    const photo = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, device: 'phone-vvvv-0001' });
+    assert.equal(photo.ok, true, JSON.stringify(photo));
+    assert.equal(photo.data.you.left, 0);
+    assert.equal(photo.data.you.videos.left, 0);
+    // Too long, too big, or not a video.
+    assert.equal(sendVideo(env, small, { device: 'phone-other-01', seconds: 60 }).error, 'too_long');
+    assert.equal(apiPost(env, { action: 'video', step: 'start', code: photoCode(env), uploadId: 'big-1', mime: 'video/mp4', size: 61 * 1024 * 1024 }).error, 'too_large');
+    assert.equal(apiPost(env, { action: 'video', step: 'start', code: photoCode(env), uploadId: 'gif-1', mime: 'image/gif', size: 100 }).error, 'bad_video');
+    // Pieces must be the right size (Drive needs multiples of 256 KB), and need the photo code.
+    const bytes = fakeVideo(PIECE + 100);
+    apiPost(env, { action: 'video', step: 'start', code: photoCode(env), uploadId: 'odd-1', mime: 'video/mp4', size: bytes.length, device: 'phone-odd-0001' });
+    assert.equal(apiPost(env, { action: 'video', step: 'chunk', code: photoCode(env), uploadId: 'odd-1', offset: 0, data: bytes.subarray(0, 1000).toString('base64') }).error, 'bad_request');
+    assert.equal(apiPost(env, { action: 'video', step: 'chunk', code: 'WRONGONE', uploadId: 'odd-1', offset: 0, data: 'AAAA' }).error, 'not_found');
+    // "0" turns videos off; blank means no limit.
+    setSettings(env, { 'Videos Per Person': 0 });
+    assert.equal(sendVideo(env, small, { device: 'phone-new-0001' }).error, 'no_videos');
+    setSettings(env, { 'Videos Per Person': '' });
+    assert.equal(list(env).data.you.videos.limit, null);
+  });
+
+  test('uploads close for videos too once sharing ends or the album is published', () => {
+    const env = setup({ settings: { ...SETTINGS, 'Photo Uploads Until': '2000-01-01' } });
+    assert.equal(sendVideo(env, fakeVideo(1000)).error, 'closed');
+  });
+
+  test('photos keep their filter too, and the couple can change or clear it on the sheet', () => {
+    const env = setup();
+    const res = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'vintage', device: 'phone-ffff-0001' });
+    assert.equal(res.data.photo.filter, 'Vintage');
+    assert.equal(photoRows(env)[0].Type, 'Photo');
+    assert.equal(apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: '<script>', device: 'phone-ffff-0001' }).data.photo.filter, '');
+    const sheet = env.ss.getSheetByName('Photos');
+    const col = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf('Filter') + 1;
+    sheet.getRange(2, col).setValue('Warm');
+    assert.equal(list(env, { device: 'phone-ffff-0001' }).data.photos[0].filter, 'Warm');
+    sheet.getRange(2, col).setValue('');
+    assert.equal(list(env, { device: 'phone-ffff-0001' }).data.photos[0].filter, '');
+  });
+
+  test('an older Photos tab gets the new columns the first time a video arrives', () => {
+    const env = setup();
+    const sheet = env.ss.getSheetByName('Photos');
+    const old = ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status'];
+    sheet.getRange(1, 1, 1, sheet.getLastColumn()).setValues([sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h, i) => old[i] || '')]);
+    assert.equal(sendVideo(env, fakeVideo(1000)).ok, true);
+    const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    for (const h of ['Type', 'Filter', 'Seconds', 'Still File ID']) assert.ok(header.includes(h), h);
+    assert.equal(photoRows(env)[0].Type, 'Video');
+  });
+
+  test('the highlight builder has its own secret code and sees everything, hidden included', () => {
+    const env = setup();
+    const s = env.gs.readSettings_(env.c);
+    assert.match(s['Review Code'], /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/);
+    assert.notEqual(s['Review Code'], s['Photo Code']);
+    assert.equal(s['Highlight Builder Link'], `https://stephanieandrobert.test/photos/highlight.html?k=${s['Review Code']}`);
+    sendVideo(env, fakeVideo(1000), { device: 'phone-aaaa-0001', filter: 'Film' });
+    apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, device: 'phone-bbbb-0002' });
+    env.ss.getSheetByName('Photos').getRange(3, 6).setValue(true);
+    const r = review(env);
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(r.data.items.map((i) => [i.kind, i.hidden]), [['video', false], ['photo', true]]);
+    assert.equal(r.data.items[0].filter, 'Film');
+    assert.deepEqual(r.data.filters, ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage']);
+    // The photo code (on every table card) doesn't open it, and wrong guesses count as misses.
+    assert.equal(review(env, photoCode(env)).error, 'not_found');
+    assert.equal(review(env, '').error, 'bad_request');
+    // Clearing the code makes a new one.
+    setSettings(env, { 'Review Code': '' });
+    env.gs.generateCodes_(env.c);
+    assert.notEqual(reviewCode(env), s['Review Code']);
+    assert.equal(review(env, s['Review Code']).error, 'not_found');
+  });
+
+  test('the builder can fetch any shared photo or video (in pieces), and nothing else in Drive', () => {
+    const env = setup();
+    const bytes = fakeVideo(Math.round(3.5 * 1024 * 1024)); // more than one fetch piece
+    const sent = sendVideo(env, bytes, { device: 'phone-aaaa-0001' });
+    assert.equal(sent.ok, true, JSON.stringify(sent));
+    const { id, poster } = sent.data.photo;
+    const parts = [];
+    let offset = 0, size = Infinity, mime = '';
+    while (offset < size) {
+      const r = apiGet(env, { action: 'media', k: reviewCode(env), id, offset });
+      assert.equal(r.ok, true, JSON.stringify(r));
+      size = r.data.size;
+      mime = r.data.mime;
+      const piece = Buffer.from(r.data.data, 'base64');
+      parts.push(piece);
+      offset += piece.length;
+    }
+    assert.equal(parts.length, 2);
+    assert.equal(mime, 'video/mp4');
+    assert.ok(Buffer.concat(parts).equals(bytes));
+    assert.equal(apiGet(env, { action: 'media', k: reviewCode(env), id: poster }).ok, true, 'stills can be fetched too');
+    // Some other file in the account: refused, even though the script could read it.
+    const other = env.gs.DriveApp.createFolder('Tax returns').createFile(env.gs.Utilities.newBlob([1, 2, 3], 'application/pdf', 'taxes.pdf'));
+    assert.equal(apiGet(env, { action: 'media', k: reviewCode(env), id: other.getId() }).error, 'not_found');
+    assert.equal(apiGet(env, { action: 'media', k: photoCode(env), id }).error, 'not_found');
+  });
+
+  test('the finished highlight is saved with the review code, shared, and shown with the album', () => {
+    const env = setup();
+    const bytes = fakeVideo(PIECE * 3 + 5);
+    // Guests can't save a highlight (the photo code isn't the review code).
+    assert.equal(sendVideo(env, bytes, { k: photoCode(env) }).error, 'not_found');
+    const res = sendVideo(env, bytes, { k: reviewCode(env), seconds: 180 });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    const file = env.drive.files.get(res.data.highlight.id);
+    assert.ok(file.bytes.equals(bytes));
+    assert.match(file.name, /^Highlight video \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.mp4$/);
+    assert.deepEqual(file.sharing, { access: 'ANYONE_WITH_LINK', permission: 'VIEW' });
+    assert.equal(env.gs.readSettings_(env.c)['Highlight Video'], file.getUrl());
+    assert.equal(photoRows(env).length, 0, 'the highlight isn\'t one of the guests\' photos');
+    assert.equal(review(env).data.highlight, file.getUrl());
+    // Guests only see the link once the album is published.
+    assert.equal(list(env).data.album.highlight, undefined);
+    env.gs.publishAlbum_(env.c, new Date());
+    assert.equal(list(env).data.album.highlight, file.getUrl());
+  });
+
+  test('a hidden video is left out of the published album like a photo', () => {
+    const env = setup();
+    const res = sendVideo(env, fakeVideo(1000), { device: 'phone-aaaa-0001' });
+    env.ss.getSheetByName('Photos').getRange(2, 6).setValue(true);
+    env.gs.publishAlbum_(env.c, new Date());
+    const video = env.drive.files.get(res.data.photo.id);
+    assert.deepEqual(video.sharing, { access: 'PRIVATE', permission: 'NONE' });
+    assert.deepEqual(list(env).data.photos, []);
   });
 });
 

@@ -136,3 +136,84 @@ body.no-scroll { overflow: hidden; }
 .photo-lightbox__caption { text-align: center; color: var(--color-on-dark); display: grid; gap: 2px; padding: 0 40px; }
 .photo-lightbox__note { font-family: var(--font-serif); font-size: 1.25rem; font-style: italic; }
 .photo-lightbox__meta { font-size: 0.82rem; letter-spacing: 0.1em; color: var(--color-on-dark-muted); }
+
+/* ---------- Videos in the grid and lightbox ---------- */
+.tile--video { cursor: pointer; }
+.tile__badge {
+  position: absolute; left: 6px; bottom: 6px; display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px 3px 6px; border-radius: 999px; background: rgba(10, 24, 18, 0.62); color: #fff;
+  font-size: 0.72rem; letter-spacing: 0.04em; pointer-events: none;
+}
+.tile__play { width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent #fff; }
+.photo-lightbox__video { display: grid; justify-items: center; width: 100%; }
+.photo-lightbox__video video { background: #000; }
+.photo-lightbox__frame { width: min(92vw, 1100px); aspect-ratio: 16 / 9; max-height: calc(100vh - 170px); border: 0; border-radius: var(--radius-sm); background: #000; }
+
+/* Video upload progress: a real bar instead of the sliding one. */
+.upload[data-kind="video"][data-state="uploading"] .upload__bar::after { width: calc(var(--progress, 0) * 100%); animation: none; }
+
+/* ---------- Filters ---------- */
+.filter-chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; margin: 0 0 6px; scrollbar-width: none; }
+.filter-chips::-webkit-scrollbar { display: none; }
+.filter-chip {
+  flex: none; display: grid; justify-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer;
+  font-size: 0.72rem; letter-spacing: 0.04em; color: var(--color-text-muted);
+}
+.filter-chip__swatch {
+  display: block; width: 46px; height: 46px; border-radius: 50%; border: 2px solid transparent;
+  background: linear-gradient(135deg, #f2c6cf 0%, #e8a7b4 30%, #7d9b8a 62%, #15322a 100%);
+  box-shadow: inset 0 0 0 2px #fff;
+}
+.filter-chip[aria-checked="true"] { color: var(--color-dark); font-weight: 500; }
+.filter-chip[aria-checked="true"] .filter-chip__swatch { border-color: var(--color-dark); }
+.filter-chip:focus-visible { outline: none; }
+.filter-chip:focus-visible .filter-chip__swatch { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.share-sheet__filter-label { margin-top: 0; }
+.share-sheet__previews--video { justify-content: center; }
+.share-sheet__video { width: auto; max-width: 100%; max-height: 38vh; border-radius: 10px; background: #000; }
+
+/* ---------- Video camera (js/recorder.js) ---------- */
+.recorder { position: fixed; inset: 0; z-index: 120; background: #000; color: #fff; overflow: hidden; }
+.recorder[hidden] { display: none; }
+.recorder__view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.recorder__view.is-mirrored { transform: scaleX(-1); }
+#rec-replay { object-fit: contain; }
+.recorder__message {
+  position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); width: min(86vw, 420px); margin: 0;
+  padding: 14px 18px; border-radius: 14px; background: rgba(0, 0, 0, 0.6); text-align: center; line-height: 1.45;
+}
+.recorder__top {
+  position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px; background: linear-gradient(rgba(0, 0, 0, 0.45), transparent);
+}
+.recorder__icon {
+  display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35); color: #fff; font-size: 1.9rem; line-height: 1; cursor: pointer;
+}
+.recorder__icon:disabled { opacity: 0.4; }
+.recorder__timer { font-size: 0.95rem; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); }
+.recorder.is-recording .recorder__timer { background: #c0392b; }
+.recorder__bottom {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 12px calc(18px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6) 35%);
+}
+.recorder.is-recording .filter-chips { visibility: hidden; }
+.filter-chips--dark .filter-chip { color: rgba(255, 255, 255, 0.8); }
+.filter-chips--dark .filter-chip[aria-checked="true"] { color: #fff; }
+.filter-chips--dark .filter-chip[aria-checked="true"] .filter-chip__swatch { border-color: #fff; }
+.filter-chips--dark { justify-content: safe center; }
+.recorder__controls { display: flex; justify-content: center; padding-top: 6px; }
+.recorder__shutter {
+  position: relative; width: 78px; height: 78px; border: 0; padding: 0; border-radius: 50%; background: none; cursor: pointer;
+}
+.recorder__shutter:disabled { opacity: 0.4; cursor: default; }
+.recorder__ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.recorder__ring circle { fill: none; stroke: #fff; stroke-width: 5; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.recorder.is-recording .recorder__ring circle { stroke: #e74c3c; stroke-dashoffset: calc(1 - var(--done, 0)); stroke-dasharray: 1 1; }
+.recorder__dot {
+  position: absolute; inset: 12px; border-radius: 50%; background: #e74c3c; transition: inset 0.2s, border-radius 0.2s;
+}
+.recorder.is-recording .recorder__dot { inset: 26px; border-radius: 6px; }
+.recorder__review { display: flex; gap: 10px; justify-content: center; padding-top: 6px; }
+.recorder__btn { flex: 1; max-width: 220px; padding-inline: 0.8em; white-space: nowrap; letter-spacing: 0.12em; background: #fff; color: var(--color-dark); border-color: #fff; }
+.recorder__btn--ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.8); }

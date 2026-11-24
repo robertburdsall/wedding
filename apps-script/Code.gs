@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '2.4.0';
+var VERSION = '3.0.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -95,7 +95,11 @@ var PHOTO_COL = {
   height: 'Height',
   uploadId: 'Upload ID',
   uploader: 'Uploader ID',
-  albumStatus: 'Album Status'
+  albumStatus: 'Album Status',
+  kind: 'Type',
+  filter: 'Filter',
+  seconds: 'Seconds',
+  posterId: 'Still File ID'
 };
 var PHOTO_HEADERS = Object.keys(PHOTO_COL).map(function (k) { return PHOTO_COL[k]; });
 var PHOTO_HEADER_NOTES = {
@@ -104,8 +108,22 @@ var PHOTO_HEADER_NOTES = {
   'Table': 'Which table card the guest scanned.',
   'Photo': 'The photo in your Google Drive folder.',
   'Uploader ID': 'Which camera the photo came from (a guest\'s personal link, or one phone). Used for the photo limit.',
-  'Album Status': '"Left out" = a Hidden photo that was moved out of the shared album folder when you published the album.'
+  'Album Status': '"Left out" = a Hidden photo that was moved out of the shared album folder when you published the album.',
+  'Type': 'Photo or Video.',
+  'Filter': 'The filter the guest picked. The file in Drive is always the original, unfiltered. Pick a different one, or clear it to show the photo or video without a filter.',
+  'Seconds': 'How long the video is.',
+  'Still File ID': 'For videos: a still from the start of the video, shown in the album grid.'
 };
+// Filters guests can pick (the looks are in site/js/photo-tools.js). Only the name is saved:
+// the photo or video itself is always kept unfiltered.
+var PHOTO_FILTERS = ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage'];
+// Videos are recorded on the camera page and sent to Drive in pieces.
+var VIDEO_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
+var VIDEO_CHUNK = 2 * 1024 * 1024; // each piece; Drive needs multiples of 256 KB
+var VIDEO_MAX_BYTES = 60 * 1024 * 1024; // a 30-second clip is usually about 10 MB
+var HIGHLIGHT_MAX_BYTES = 800 * 1024 * 1024;
+var MEDIA_PIECE = 3 * 1024 * 1024; // how much of a file the highlight builder fetches at a time
+var UPLOAD_SESSION_SECONDS = 6 * 60 * 60;
 // Phones shrink photos before uploading (see site/js/photos.js), so these are generous.
 var PHOTO_MAX_BASE64 = 14 * 1024 * 1024; // about 10 MB of JPEG
 var MAX_BODY_LENGTH = PHOTO_MAX_BASE64 + 20000;
@@ -172,7 +190,13 @@ var SETTINGS_DEFAULTS = [
   ['Photo Page Link', '', 'Filled in automatically: the link in the table QR codes.'],
   ['Photo Slideshow Link', '', 'Filled in automatically: a slideshow of the album for a TV or projector. It shows photos only after you publish the album.'],
   ['Photo Table Cards Link', '', 'Filled in automatically: open this on a computer to print the table QR cards.'],
-  ['Photos Per Person', 20, 'How many photos each guest can share with their camera. Blank = no limit.'],
+  ['Photos Per Person', 50, 'How many photos each guest can share with their camera. Blank = no limit.'],
+  ['Videos Per Person', 10, 'How many videos each guest can record with their camera. 0 = no videos. Blank = no limit.'],
+  ['Video Seconds', 30, 'The longest a guest\'s video can be, in seconds (5 to 120).'],
+  ['Review Code', '', 'Filled in automatically: the secret code for your highlight builder. Don\'t share it. Clear it to get a new one.'],
+  ['Highlight Builder Link', '', 'Filled in automatically: open this on a computer (in Chrome) to put together the highlight video from guests\' clips.'],
+  ['Highlight Video', '', 'Filled in when you save a highlight video from the builder: the link to send to people who couldn\'t make it.'],
+  ['Video Stills Folder', '', 'Filled in automatically: where the still for each video\'s album tile is kept.'],
   ['Camera Email Days Before', 3, 'How many days before the Ceremony Date to email each reception guest their personal camera link (around 9 AM). Blank = don\'t send automatically.'],
   ['Camera Email Subject', 'Your camera for our wedding', ''],
   ['Album Email Subject', 'Our wedding photos are here!', ''],
@@ -246,8 +270,8 @@ function parseBody_(e) {
   } catch (err) {
     fail_('bad_request', 'Request was not valid JSON.');
   }
-  // Only photo uploads may be big.
-  if (raw.length > 10000 && body.action !== 'photo') fail_('bad_request', 'Request is too large.');
+  // Only photo uploads and video pieces may be big.
+  if (raw.length > 10000 && body.action !== 'photo' && body.action !== 'video') fail_('bad_request', 'Request is too large.');
   return body;
 }
 
@@ -258,6 +282,11 @@ function handleGet_(c, params, now) {
     var photoSettings = readSettings_(c);
     checkPhotoCode_(photoSettings, params.t || params.code, now);
     return photosPayload_(c, photoSettings, now, params);
+  }
+  if (action === 'review' || action === 'media') {
+    var reviewSettings = readSettings_(c);
+    checkReviewCode_(reviewSettings, params.k, now);
+    return action === 'review' ? reviewPayload_(c, reviewSettings) : mediaPiece_(c, params);
   }
   if (action !== 'invite' && action !== 'opened' && action !== 'meal') fail_('bad_request', 'Unknown action.');
 
@@ -278,6 +307,7 @@ function handlePost_(c, body, now) {
   if (body.action === 'rsvp') return submitRsvp_(c, body, now);
   if (body.action === 'meal') return submitMeals_(c, body, now);
   if (body.action === 'photo') return submitPhoto_(c, body, now);
+  if (body.action === 'video') return submitVideo_(c, body, now);
   fail_('bad_request', 'Unknown action.');
 }
 
@@ -942,7 +972,14 @@ function ensurePhotoSettings_(c, settings) {
     if (!writeSetting_(c, 'Photo Code', code)) return;
     settings['Photo Code'] = code;
   }
+  // A separate secret code for the highlight builder, which sees every photo and video.
+  var review = normalizeCode_(setting_(settings, 'Review Code'));
+  if (!review || review === code) {
+    review = randomCode_() + randomCode_().slice(0, 4);
+    if (writeSetting_(c, 'Review Code', review)) settings['Review Code'] = review;
+  }
   var links = photoLinks_(settings, code);
+  links['Highlight Builder Link'] = String(setting_(settings, 'Site URL')).replace(/\/+$/, '') + '/photos/highlight.html?k=' + review;
   Object.keys(links).forEach(function (key) {
     if (setting_(settings, key) !== links[key] && writeSetting_(c, key, links[key])) settings[key] = links[key];
   });
@@ -958,7 +995,12 @@ function writeSetting_(c, key, value) {
       return true;
     }
   }
-  return false;
+  // A setting this sheet doesn't have yet (Set up sheets hasn't been run since an update).
+  var known = SETTINGS_DEFAULTS.filter(function (d) { return d[0] === key; })[0];
+  if (!known) return false;
+  sh.appendRow([key, '', known[2]]);
+  sh.getRange(sh.getLastRow(), 2).setNumberFormat('@').setValue(value);
+  return true;
 }
 
 function photoSheet_(c) {
@@ -1002,7 +1044,11 @@ function readPhotos_(c) {
       width: Number(get(row, 'width')) || 0,
       height: Number(get(row, 'height')) || 0,
       uploader: String(get(row, 'uploader')).trim(),
-      albumStatus: String(get(row, 'albumStatus')).trim()
+      albumStatus: String(get(row, 'albumStatus')).trim(),
+      kind: /video/i.test(String(get(row, 'kind'))) ? 'video' : 'photo',
+      filter: cleanFilter_(get(row, 'filter')),
+      seconds: Number(get(row, 'seconds')) || 0,
+      posterId: String(get(row, 'posterId')).trim()
     };
   });
 }
@@ -1013,7 +1059,12 @@ function isoTime_(v) {
 
 function publicPhoto_(p) {
   var taken = isoTime_(p.takenAt) || isoTime_(p.uploadedAt);
-  return { id: p.id, w: p.width, h: p.height, takenAt: taken, uploadedAt: isoTime_(p.uploadedAt) || taken, from: p.from, caption: p.caption, table: p.table };
+  var out = { id: p.id, w: p.width, h: p.height, takenAt: taken, uploadedAt: isoTime_(p.uploadedAt) || taken, from: p.from, caption: p.caption, table: p.table, kind: p.kind || 'photo', filter: p.filter || '' };
+  if (out.kind === 'video') {
+    out.seconds = p.seconds || 0;
+    out.poster = DRIVE_ID_.test(p.posterId || '') ? p.posterId : '';
+  }
+  return out;
 }
 
 var DRIVE_ID_ = /^[A-Za-z0-9_-]{10,200}$/;
@@ -1037,7 +1088,11 @@ function photosPayload_(c, settings, now, params) {
   var you = photoAllowance_(all, uploader, settings);
   you.name = person ? person.name : '';
   var album = { published: published };
-  if (published) album.url = folderUrl_(setting_(settings, 'Photo Folder'));
+  if (published) {
+    album.url = folderUrl_(setting_(settings, 'Photo Folder'));
+    var highlight = setting_(settings, 'Highlight Video');
+    if (/^https:\/\//.test(highlight)) album.highlight = highlight;
+  }
   return {
     photos: photos,
     uploads: { open: uploads.open && !published, until: uploads.deadline, untilText: uploads.deadlineText },
@@ -1095,19 +1150,14 @@ function withLock_(fn) {
 function submitPhoto_(c, body, now) {
   var settings = readSettings_(c);
   checkPhotoCode_(settings, body.code, now);
-  var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
-  if (!uploads.open) fail_('closed', 'Photo sharing closed on ' + uploads.deadlineText + '. Thank you for all the photos!');
-  if (albumPublished_(settings)) fail_('closed', 'The photo album is finished. Thank you for all the photos!');
+  checkUploadsOpen_(settings, now);
 
   var data = typeof body.data === 'string' ? body.data.replace(/^data:image\/jpeg;base64,/, '') : '';
   if (!data) fail_('bad_request', 'Missing photo.');
   if (data.length > PHOTO_MAX_BASE64) fail_('too_large', 'That photo is too large to share. Please try a different one.');
   if (data.slice(0, 4) !== '/9j/' || !/^[A-Za-z0-9+\/]+={0,2}$/.test(data)) fail_('bad_photo', 'Only photos can be shared here.');
-  var uploadId = String(body.uploadId || '').replace(/[^A-Za-z0-9\-]/g, '').slice(0, 64);
-  function already() {
-    if (!uploadId) return null;
-    return readPhotos_(c).filter(function (p) { return p.uploadId === uploadId; })[0] || null;
-  }
+  var uploadId = cleanUploadId_(body.uploadId);
+  function already() { return findUpload_(c, uploadId); }
   // A retried upload (the reply got lost) returns the photo that was already saved.
   var dup = already();
   if (dup) return { photo: publicPhoto_(dup), duplicate: true };
@@ -1128,6 +1178,7 @@ function submitPhoto_(c, body, now) {
   var table = cleanTable_(body.table);
   var width = photoDimension_(body.width);
   var height = photoDimension_(body.height);
+  var filter = cleanFilter_(body.filter);
 
   var folderId = withLock_(function () { return photoFolderId_(c, settings); });
   var fileName = Utilities.formatDate(takenAt, Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm.ss') +
@@ -1155,22 +1206,15 @@ function submitPhoto_(c, body, now) {
       file.setTrashed(true);
       throw err;
     }
-    var sh = photoSheet_(c);
-    var info = photoCols_(sh);
-    var row = [];
-    for (var i = 0; i < info.width; i++) row.push('');
-    var values = {
+    appendPhotoRow_(c, {
       uploadedAt: now, takenAt: takenAt, from: safeText_(from), caption: safeText_(caption), table: safeText_(table),
-      hidden: false, preview: DRIVE_ID_.test(id) ? '=IMAGE("https://drive.google.com/thumbnail?id=' + id + '&sz=w200")' : '',
-      link: file.getUrl(), fileId: id, width: width, height: height, uploadId: uploadId, uploader: uploader
-    };
-    Object.keys(values).forEach(function (key) { if (info.cols[key] >= 0) row[info.cols[key]] = values[key]; });
-    sh.appendRow(row);
-    SpreadsheetApp.flush();
+      hidden: false, preview: previewFormula_(id), link: file.getUrl(), fileId: id, width: width, height: height,
+      uploadId: uploadId, uploader: uploader, kind: 'Photo', filter: filter
+    });
     var you = allowance();
     you.name = person ? person.name : '';
     return {
-      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0 }),
+      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0, filter: filter }),
       duplicate: false,
       you: you
     };
@@ -1280,10 +1324,354 @@ function photoLimit_(settings) {
   return n > 0 ? n : 0;
 }
 
+/* ---------- Shared bits for photos and videos ---------- */
+
+function cleanUploadId_(v) {
+  return String(v || '').replace(/[^A-Za-z0-9\-]/g, '').slice(0, 64);
+}
+
+// A photo or video that was already saved (its reply got lost, so the phone sent it again).
+function findUpload_(c, uploadId) {
+  if (!uploadId) return null;
+  return readPhotos_(c).filter(function (p) { return p.uploadId === uploadId; })[0] || null;
+}
+
+function checkUploadsOpen_(settings, now) {
+  var uploads = deadlineInfo_(settings, 'Photo Uploads Until', now);
+  if (!uploads.open) fail_('closed', 'Photo sharing closed on ' + uploads.deadlineText + '. Thank you for all the photos!');
+  if (albumPublished_(settings)) fail_('closed', 'The photo album is finished. Thank you for all the photos!');
+}
+
+function cleanFilter_(v) {
+  var s = String(v === null || v === undefined ? '' : v).trim().toLowerCase();
+  for (var i = 0; i < PHOTO_FILTERS.length; i++) if (PHOTO_FILTERS[i].toLowerCase() === s) return PHOTO_FILTERS[i];
+  return '';
+}
+
+function previewFormula_(id) {
+  return DRIVE_ID_.test(id || '') ? '=IMAGE("https://drive.google.com/thumbnail?id=' + id + '&sz=w200")' : '';
+}
+
+// Adds a row to the Photos tab (adding any columns an older sheet is missing first).
+function appendPhotoRow_(c, values) {
+  var sh = photoSheet_(c);
+  var info = photoCols_(sh);
+  var missing = PHOTO_HEADERS.filter(function (h) { return info.cols[photoKey_(h)] < 0; });
+  if (missing.length) {
+    sh.getRange(1, info.width + 1, 1, missing.length).setValues([missing]);
+    info = photoCols_(sh);
+  }
+  var row = [];
+  for (var i = 0; i < info.width; i++) row.push('');
+  Object.keys(values).forEach(function (key) { if (info.cols[key] >= 0) row[info.cols[key]] = values[key]; });
+  sh.appendRow(row);
+  SpreadsheetApp.flush();
+}
+
+function photoKey_(header) {
+  for (var k in PHOTO_COL) if (PHOTO_COL[k] === header) return k;
+  return '';
+}
+
+/* ---------- Videos: recorded on the camera page and sent to Drive in pieces ----------
+ * 1. "start": checks the camera's video allowance and opens a Drive upload.
+ * 2. "chunk": each 2 MB piece goes straight on to Drive (nothing big is held in memory).
+ * 3. "finish": saves the still for the album grid and adds the row to the Photos tab.
+ * The couple's highlight builder uses the same steps (with the review code) to save the
+ * finished highlight video. */
+
+function videoType_(v) {
+  var base = String(v || '').split(';')[0].trim().toLowerCase();
+  return VIDEO_TYPES[base] ? base : '';
+}
+
+function driveApi_(method, url, opts) {
+  opts = opts || {};
+  var headers = opts.headers || {};
+  headers.Authorization = 'Bearer ' + ScriptApp.getOAuthToken();
+  var params = { method: method, muteHttpExceptions: true, followRedirects: false, headers: headers };
+  if (opts.contentType) params.contentType = opts.contentType;
+  if (opts.payload !== undefined) params.payload = opts.payload;
+  return UrlFetchApp.fetch(url, params);
+}
+
+function responseHeader_(res, name) {
+  var h = res.getHeaders() || {};
+  var want = name.toLowerCase();
+  for (var k in h) if (k.toLowerCase() === want) return String(h[k]);
+  return '';
+}
+
+function startDriveUpload_(folderId, name, mime, size, description) {
+  var res = driveApi_('post', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
+    contentType: 'application/json; charset=UTF-8',
+    headers: { 'X-Upload-Content-Type': mime, 'X-Upload-Content-Length': String(size) },
+    payload: JSON.stringify({ name: name, parents: [folderId], mimeType: mime, description: description || '' })
+  });
+  var location = responseHeader_(res, 'Location');
+  if (res.getResponseCode() !== 200 || !location) {
+    console.error('Drive upload start failed: ' + res.getResponseCode() + ' ' + String(res.getContentText()).slice(0, 300));
+    fail_('upload_failed', 'The video could not be saved right now. Please try again in a minute.');
+  }
+  return location;
+}
+
+// Sends one piece. Returns { received: how much Drive has, fileId: once it has it all }.
+function sendDrivePiece_(url, bytes, offset, size) {
+  var res = driveApi_('put', url, {
+    contentType: 'application/octet-stream',
+    headers: { 'Content-Range': 'bytes ' + offset + '-' + (offset + bytes.length - 1) + '/' + size },
+    payload: bytes
+  });
+  var code = res.getResponseCode();
+  if (code === 200 || code === 201) {
+    var file = JSON.parse(res.getContentText() || '{}');
+    return { received: size, fileId: String(file.id || '') };
+  }
+  if (code === 308) {
+    var m = responseHeader_(res, 'Range').match(/bytes=0-(\d+)/);
+    return { received: m ? Number(m[1]) + 1 : 0 };
+  }
+  if (code === 404 || code === 410) fail_('upload_expired', 'The upload took too long, so it will start again.');
+  console.error('Drive upload piece failed: ' + code + ' ' + String(res.getContentText()).slice(0, 300));
+  fail_('upload_failed', 'The connection to Google Drive dropped. Trying again…');
+}
+
+function uploadCacheKey_(uploadId) { return 'upload:' + uploadId; }
+function saveUploadState_(u) {
+  CacheService.getScriptCache().put(uploadCacheKey_(u.uploadId), JSON.stringify(u), UPLOAD_SESSION_SECONDS);
+}
+function loadUploadState_(uploadId) {
+  var raw = CacheService.getScriptCache().get(uploadCacheKey_(uploadId));
+  return raw ? JSON.parse(raw) : null;
+}
+
+function shareFile_(file) {
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (err) {
+    console.error('Could not share ' + file.getId() + ': ' + (err && err.message ? err.message : err));
+  }
+}
+
+function submitVideo_(c, body, now) {
+  var settings = readSettings_(c);
+  var highlight = body.k !== undefined && body.k !== null && body.k !== '';
+  if (highlight) checkReviewCode_(settings, body.k, now);
+  else checkPhotoCode_(settings, body.code, now);
+  var uploadId = cleanUploadId_(body.uploadId);
+  if (!uploadId) fail_('bad_request', 'Missing upload id.');
+  var step = String(body.step || '');
+  if (step === 'start') return startVideo_(c, settings, body, uploadId, highlight, now);
+  var u = loadUploadState_(uploadId);
+  if (!u || u.highlight !== highlight) {
+    var done = highlight ? null : findUpload_(c, uploadId);
+    if (done) return { photo: publicPhoto_(done), duplicate: true, received: Number(body.size) || 0, complete: true };
+    fail_('upload_expired', 'The upload took too long, so it will start again.');
+  }
+  if (step === 'chunk') return videoChunk_(u, body);
+  if (step === 'finish') return finishVideo_(c, settings, u, body, now);
+  fail_('bad_request', 'Unknown step.');
+}
+
+function startVideo_(c, settings, body, uploadId, highlight, now) {
+  var mime = videoType_(body.mime);
+  if (!mime) fail_('bad_video', 'This kind of video can\'t be shared here.');
+  var size = Math.floor(Number(body.size));
+  if (!(size > 0)) fail_('bad_request', 'Missing video size.');
+  if (size > (highlight ? HIGHLIGHT_MAX_BYTES : VIDEO_MAX_BYTES)) {
+    fail_('too_large', highlight ? 'That video is too large to save. Try a shorter highlight.' : 'That video is too large to share. Please record a shorter one.');
+  }
+  var tz = Session.getScriptTimeZone();
+  var u = { uploadId: uploadId, highlight: highlight, mime: mime, size: size, received: 0 };
+  var name, description = '';
+  if (highlight) {
+    name = 'Highlight video ' + Utilities.formatDate(now, tz, 'yyyy-MM-dd HH.mm') + '.' + VIDEO_TYPES[mime];
+  } else {
+    checkUploadsOpen_(settings, now);
+    var dup = findUpload_(c, uploadId);
+    if (dup) return { photo: publicPhoto_(dup), duplicate: true, received: size, complete: true };
+    var person = body.me ? cameraPerson_(c, body.me, now) : null;
+    var uploader = person ? person.id : deviceId_(body.device);
+    var a = photoAllowance_(readPhotos_(c), uploader, settings);
+    if (a.videos.limit === 0) fail_('no_videos', 'Videos aren\'t being collected, but photos are welcome!');
+    if (a.videos.limit && uploader && a.videos.left <= 0) fail_('limit_reached', 'You\'ve shared all ' + a.videos.limit + ' of your videos. Thank you!');
+    var seconds = Math.round(Number(body.seconds) * 10) / 10;
+    if (seconds > a.videos.seconds + 5) fail_('too_long', 'Videos can be up to ' + a.videos.seconds + ' seconds long.');
+    var takenAt = photoTime_(body.takenAt, now);
+    var from = cleanText_(body.from, 60) || (person ? person.name : '');
+    u.meta = {
+      takenAt: takenAt.toISOString(), from: from, caption: cleanText_(body.caption, 200), table: cleanTable_(body.table),
+      width: photoDimension_(body.width), height: photoDimension_(body.height), seconds: seconds > 0 ? seconds : '',
+      filter: cleanFilter_(body.filter), uploader: uploader, personName: person ? person.name : ''
+    };
+    name = Utilities.formatDate(takenAt, tz, 'yyyy-MM-dd HH.mm.ss') + (from ? ' ' + from.replace(/[\\\/:*?"<>|]/g, '') : '') + '.' + VIDEO_TYPES[mime];
+    description = u.meta.caption;
+  }
+  u.folderId = withLock_(function () { return photoFolderId_(c, settings); });
+  u.url = startDriveUpload_(u.folderId, name, mime, size, description);
+  saveUploadState_(u);
+  return { chunkSize: VIDEO_CHUNK, received: 0 };
+}
+
+function videoChunk_(u, body) {
+  if (u.fileId) return { received: u.size, complete: true };
+  var offset = Math.floor(Number(body.offset));
+  if (!(offset >= 0) || offset > u.size) fail_('bad_request', 'Bad position in the video.');
+  // A piece Drive already has (its reply got lost): say where to carry on from.
+  if (offset !== u.received) return { received: u.received, complete: false };
+  var data = typeof body.data === 'string' ? body.data : '';
+  if (!data || !/^[A-Za-z0-9+\/]+={0,2}$/.test(data)) fail_('bad_request', 'Missing video data.');
+  var bytes = Utilities.base64Decode(data);
+  if (offset + bytes.length > u.size) fail_('bad_request', 'More video than expected.');
+  if (offset + bytes.length < u.size && bytes.length % (256 * 1024) !== 0) fail_('bad_request', 'Pieces must be a multiple of 256 KB.');
+  var r = sendDrivePiece_(u.url, bytes, offset, u.size);
+  u.received = r.received;
+  if (r.fileId) u.fileId = r.fileId;
+  saveUploadState_(u);
+  return { received: u.received, complete: !!u.fileId };
+}
+
+// Where the stills for video tiles go: their own folder, so the album download is just
+// the photos and videos.
+function stillsFolderId_(c, settings, folderId) {
+  var raw = setting_(settings, 'Video Stills Folder');
+  var m = raw.match(/folders\/([A-Za-z0-9_-]+)/) || raw.match(/^([A-Za-z0-9_-]{10,})$/);
+  if (m) {
+    try { return DriveApp.getFolderById(m[1]).getId(); } catch (err) { /* make a new one */ }
+  }
+  var f = DriveApp.createFolder(DriveApp.getFolderById(folderId).getName() + ' (video stills)');
+  writeSetting_(c, 'Video Stills Folder', f.getUrl());
+  settings['Video Stills Folder'] = f.getUrl();
+  return f.getId();
+}
+
+function finishVideo_(c, settings, u, body, now) {
+  if (!u.fileId) fail_('upload_incomplete', 'Part of the video is still missing. Trying again…');
+  var file = DriveApp.getFileById(u.fileId);
+  shareFile_(file);
+  if (u.highlight) {
+    writeSetting_(c, 'Highlight Video', file.getUrl());
+    CacheService.getScriptCache().remove(uploadCacheKey_(u.uploadId));
+    return { highlight: { id: u.fileId, url: file.getUrl() } };
+  }
+  var m = u.meta;
+  return withLock_(function () {
+    var dup = findUpload_(c, u.uploadId);
+    if (dup) return { photo: publicPhoto_(dup), duplicate: true };
+    var a = photoAllowance_(readPhotos_(c), m.uploader, settings);
+    if (a.videos.limit !== null && m.uploader && a.videos.left <= 0) {
+      file.setTrashed(true);
+      fail_('limit_reached', 'You\'ve shared all ' + a.videos.limit + ' of your videos. Thank you!');
+    }
+    // A still from the video (made on the phone) for the album grid.
+    var posterId = '';
+    var poster = typeof body.poster === 'string' ? body.poster.replace(/^data:image\/jpeg;base64,/, '') : '';
+    if (poster && poster.length < 3 * 1024 * 1024 && poster.slice(0, 4) === '/9j/' && /^[A-Za-z0-9+\/]+={0,2}$/.test(poster)) {
+      try {
+        var still = DriveApp.getFolderById(stillsFolderId_(c, settings, u.folderId))
+          .createFile(Utilities.newBlob(Utilities.base64Decode(poster), 'image/jpeg', file.getName().replace(/\.\w+$/, '') + ' (still).jpg'));
+        shareFile_(still);
+        posterId = still.getId();
+      } catch (err) {
+        console.error('Could not save the video still: ' + (err && err.message ? err.message : err));
+      }
+    }
+    var takenAt = new Date(m.takenAt);
+    appendPhotoRow_(c, {
+      uploadedAt: now, takenAt: takenAt, from: safeText_(m.from), caption: safeText_(m.caption), table: safeText_(m.table),
+      hidden: false, preview: previewFormula_(posterId || u.fileId), link: file.getUrl(), fileId: u.fileId,
+      width: m.width, height: m.height, uploadId: u.uploadId, uploader: m.uploader,
+      kind: 'Video', filter: m.filter, seconds: m.seconds, posterId: posterId
+    });
+    CacheService.getScriptCache().remove(uploadCacheKey_(u.uploadId));
+    var you = photoAllowance_(readPhotos_(c), m.uploader, settings);
+    you.name = m.personName;
+    return {
+      photo: publicPhoto_({
+        id: u.fileId, uploadedAt: now, takenAt: takenAt, from: m.from, caption: m.caption, table: m.table,
+        width: Number(m.width) || 0, height: Number(m.height) || 0, kind: 'video', filter: m.filter, seconds: Number(m.seconds) || 0, posterId: posterId
+      }),
+      duplicate: false,
+      you: you
+    };
+  });
+}
+
+/* ---------- The couple's highlight builder (photos/highlight.html?k=REVIEWCODE) ---------- */
+
+function checkReviewCode_(settings, code, now) {
+  var guard = codeGuard_(now);
+  var given = normalizeCode_(code);
+  if (!given) fail_('bad_request', 'Please enter your review code.');
+  var real = normalizeCode_(setting_(settings, 'Review Code'));
+  if (!real) fail_('not_ready', 'Run 💌 Wedding → Set up sheets first, then use the Highlight Builder Link from the Settings tab.');
+  if (given !== real) {
+    guard.miss();
+    fail_('not_found', 'That review code didn\'t work. Use the Highlight Builder Link from the Settings tab.');
+  }
+}
+
+// Everything guests shared, hidden ones included (marked), oldest first.
+function reviewPayload_(c, settings) {
+  var items = readPhotos_(c)
+    .filter(function (p) { return DRIVE_ID_.test(p.id); })
+    .map(function (p) {
+      var o = publicPhoto_(p);
+      o.hidden = p.hidden;
+      return o;
+    })
+    .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : 0; });
+  return { items: items, filters: PHOTO_FILTERS, highlight: setting_(settings, 'Highlight Video') };
+}
+
+// Part of one shared photo or video (base64), for the builder to put together on the computer.
+// Only files listed on the Photos tab can be read this way.
+function mediaPiece_(c, params) {
+  var id = String(params.id || '');
+  if (!DRIVE_ID_.test(id)) fail_('bad_request', 'Bad file id.');
+  var listed = readPhotos_(c).some(function (p) { return p.id === id || p.posterId === id; });
+  if (!listed) fail_('not_found', 'That file isn\'t one of the shared photos or videos.');
+  var file = DriveApp.getFileById(id);
+  var size = file.getSize();
+  var offset = Math.max(0, Math.floor(Number(params.offset) || 0));
+  var mime = file.getMimeType();
+  if (offset >= size) return { size: size, offset: offset, mime: mime, data: '' };
+  var end = Math.min(size, offset + MEDIA_PIECE) - 1;
+  var res = driveApi_('get', 'https://www.googleapis.com/drive/v3/files/' + id + '?alt=media&supportsAllDrives=true', {
+    headers: { Range: 'bytes=' + offset + '-' + end }
+  });
+  var code = res.getResponseCode();
+  if (code !== 200 && code !== 206) fail_('upload_failed', 'Google Drive didn\'t send the file. Please try again.');
+  var bytes = res.getContent();
+  if (code === 200 && bytes.length > end - offset + 1) bytes = bytes.slice(offset, end + 1);
+  return { size: size, offset: offset, mime: mime, data: Utilities.base64Encode(bytes) };
+}
+
+// Blank = no limit; 0 = no videos at all.
+function videoLimit_(settings) {
+  var raw = setting_(settings, 'Videos Per Person');
+  if (raw === '') return null;
+  var n = Math.floor(Number(raw));
+  return n >= 0 ? n : null;
+}
+
+function videoSeconds_(settings) {
+  var n = Math.round(Number(setting_(settings, 'Video Seconds')));
+  return n > 0 ? Math.min(120, Math.max(5, n)) : 30;
+}
+
+// How many photos and videos a camera has used and has left. Videos are counted separately.
 function photoAllowance_(photos, uploader, settings) {
   var limit = photoLimit_(settings);
-  var used = uploader ? photos.filter(function (p) { return p.uploader === uploader; }).length : 0;
-  return { limit: limit || null, used: used, left: limit ? Math.max(0, limit - used) : null };
+  var mine = uploader ? photos.filter(function (p) { return p.uploader === uploader; }) : [];
+  var used = mine.filter(function (p) { return p.kind !== 'video'; }).length;
+  var vLimit = videoLimit_(settings);
+  var vUsed = mine.length - used;
+  return {
+    limit: limit || null, used: used, left: limit ? Math.max(0, limit - used) : null,
+    videos: { limit: vLimit, used: vUsed, left: vLimit === null ? null : Math.max(0, vLimit - vUsed), seconds: videoSeconds_(settings) }
+  };
 }
 
 // True from "Camera Email Days Before" the Ceremony Date through the wedding day.
@@ -1313,9 +1701,11 @@ function buildCameraEmail_(people, settings) {
   var limit = photoLimit_(settings);
   var names = people.map(function (p) { return p.name; });
   var several = people.length > 1;
+  var vLimit = videoLimit_(settings);
+  var shots = (limit ? 'up to ' + limit + ' photos' : 'photos') +
+    (vLimit === 0 ? '' : ' and ' + (vLimit ? vLimit + ' ' : '') + 'short videos');
   var intro = (several ? 'Each of you has your own camera for the reception' : 'Here is your own camera for the reception') +
-    (limit ? ': take up to ' + limit + ' photos' + (several ? ' each' : '') : '') +
-    '. Just open it on your phone. No app needed.';
+    ': take ' + shots + (several && (limit || vLimit) ? ' each' : '') + '. Just open it on your phone. No app needed.';
   var buttons = people.map(function (p) {
     return emailButton_(p.link, several ? 'OPEN ' + firstNames_([p.name]).toUpperCase() + '\'S CAMERA' : 'OPEN YOUR CAMERA');
   }).join('');
@@ -2009,7 +2399,8 @@ function setupSheets_(c) {
     return "'" + c.names.photos.replace(/'/g, "''") + "'!" + L + '2:' + L;
   }
   rows.push(['', '']);
-  rows.push(['Photos shared', '=COUNTA(' + photoCol('fileId') + ')']);
+  rows.push(['Photos shared', '=COUNTA(' + photoCol('fileId') + ')-COUNTIF(' + photoCol('kind') + ',"Video")']);
+  rows.push(['Videos shared', '=COUNTIF(' + photoCol('kind') + ',"Video")']);
   rows.push(['Photos hidden', '=COUNTIF(' + photoCol('hidden') + ',TRUE)']);
   function entries(name, sep) {
     var r = col(name);
@@ -2127,6 +2518,7 @@ function menuPhotoLinks() {
     'Table cards (open on a computer and print):\n' + setting_(settings, 'Photo Table Cards Link') + '\n\n' +
     'Album slideshow (shows photos once you publish the album):\n' + setting_(settings, 'Photo Slideshow Link') + '\n\n' +
     'Photo page (what the QR codes open):\n' + setting_(settings, 'Photo Page Link') + '\n\n' +
+    'Highlight builder (just for you two, on a computer in Chrome):\n' + setting_(settings, 'Highlight Builder Link') + '\n\n' +
     'Photos are saved to:\n' + setting_(settings, 'Photo Folder') + '\n\n' +
     'These are also on the Settings tab.');
 }

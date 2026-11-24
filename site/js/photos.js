@@ -1,7 +1,9 @@
 // The reception camera and, once it's published, the photo album. Guests open their emailed
-// camera link (or scan the QR code on their table) and add photos from their phone. Photos are
-// saved to Google Drive through the Apps Script (apps-script/Code.gs) and listed on the "Photos"
-// tab of the Sheet. Until the couple publishes the album, each guest only sees their own photos.
+// camera link (or scan the QR code on their table), add photos from their phone and record
+// short videos right on the page (js/recorder.js), with an optional filter. Everything is saved
+// to Google Drive through the Apps Script (apps-script/Code.gs) and listed on the "Photos" tab
+// of the Sheet; filters are saved by name, and the files stay the unfiltered originals.
+// Until the couple publishes the album, each guest only sees their own photos and videos.
 (function () {
   'use strict';
 
@@ -20,6 +22,7 @@
   let waiting = null;       // a newer list held back until the guest taps "new photos"
   let order = 'oldest';
   const local = new Map();  // photo id → preview of a photo shared from this phone (shows instantly)
+  const localVideo = new Map(); // video id → the recording itself, for videos shared from this phone
 
   const MAX_PER_PICK = 60;
   const CONCURRENT_UPLOADS = 2;
@@ -140,6 +143,9 @@
     closed.hidden = up.open !== false || album.published;
     const download = $('#album-download');
     download.hidden = !(album.published && album.url);
+    const highlight = $('#album-highlight');
+    highlight.hidden = !(album.published && album.highlight);
+    if (album.highlight) highlight.href = album.highlight;
     if (album.published) {
       // The finished album: no more uploads, and a link to download everything.
       $('#photos-eyebrow').textContent = 'Stephanie & Robert';
@@ -150,33 +156,48 @@
       $('#photos-intro').textContent = "We'll send everyone the album once we've looked through all the photos.";
       closed.textContent = `Photo sharing closed${up.untilText ? ` on ${up.untilText}` : ''}. Thank you for all the photos!`;
     } else if (you.name) {
-      $('#photos-intro').textContent = `Hi ${firstName(you.name)}! This is your camera for the reception. Snap away! Your photos come straight to us, and we'll send everyone the album after the wedding.`;
+      $('#photos-intro').textContent = `Hi ${firstName(you.name)}! This is your camera for the reception. Snap photos and record videos! They come straight to us, and we'll send everyone the album after the wedding.`;
     }
     $('#timeline-note').hidden = !!album.published || !photos.length;
     renderAllowance();
     renderTimeline();
   }
 
-  // Photos this camera still has, minus any waiting to upload.
+  // Photos and videos this camera still has, minus any waiting to upload.
+  const queuedOf = (kind) => uploads.filter((u) => u.kind === kind && u.state !== 'done' && u.state !== 'failed').length;
   function photosLeft() {
     const you = data.you || {};
     if (!you.limit) return Infinity;
-    const queued = uploads.filter((u) => u.state !== 'done' && u.state !== 'failed').length;
-    return Math.max(0, you.left - queued);
+    return Math.max(0, you.left - queuedOf('photo'));
   }
+  function videoInfo() { return (data.you && data.you.videos) || {}; }
+  function videosLeft() {
+    const v = videoInfo();
+    if (v.limit === 0) return 0;
+    if (!v.limit) return Infinity;
+    return Math.max(0, v.left - queuedOf('video'));
+  }
+  const canRecord = !!(window.VideoRecorder && window.VideoRecorder.supported());
 
   function renderAllowance() {
     const you = data.you || {};
+    const v = videoInfo();
     const el = $('#photos-left');
     const open = !(data.uploads && data.uploads.open === false);
-    el.hidden = !you.limit || !open;
-    if (!you.limit || !open) return;
-    const left = photosLeft();
-    el.textContent = left > 0
-      ? `${left} of ${you.limit} photo${you.limit === 1 ? '' : 's'} left`
-      : `That's all ${you.limit} of your photos. Thank you for sharing!`;
-    $('.photos-actions').hidden = left <= 0;
-    $('#photos-hint').hidden = left <= 0;
+    const pLeft = photosLeft();
+    const vLeft = canRecord ? videosLeft() : 0;
+    $('#camera-button').hidden = !touch || pLeft <= 0;
+    $('#choose-button').hidden = pLeft <= 0;
+    $('#video-button').hidden = vLeft <= 0;
+    const nothingLeft = pLeft <= 0 && vLeft <= 0;
+    $('.photos-actions').hidden = nothingLeft;
+    $('#photos-hint').hidden = nothingLeft;
+    const parts = [];
+    if (you.limit) parts.push(`${Math.min(pLeft, you.limit)} of ${plural(you.limit, 'photo')}`);
+    if (canRecord && v.limit) parts.push(`${Math.min(vLeft, v.limit)} of ${plural(v.limit, 'video')}`);
+    el.hidden = !open || !parts.length;
+    if (el.hidden) return;
+    el.textContent = nothingLeft ? "That's everything for your camera. Thank you for sharing!" : `${parts.join(' and ')} left`;
   }
 
   function byTime(a, b) {
@@ -185,8 +206,11 @@
     return (a.uploadedAt || '') < (b.uploadedAt || '') ? -1 : 1;
   }
 
+  const isVideo = (p) => p.kind === 'video';
+  // Videos show their still (or Drive's own thumbnail of the video if there isn't one).
+  const stillId = (p) => (isVideo(p) ? p.poster || p.id : p.id);
   function imageFor(photo, size) {
-    return local.get(photo.id) || T.photoUrl(photo.id, size);
+    return local.get(photo.id) || T.photoUrl(stillId(photo), size);
   }
 
   // Google Drive sometimes needs a few seconds to make the small version of a new photo.
@@ -195,7 +219,7 @@
     img.addEventListener('error', () => {
       if (tries >= 3) { img.closest('.tile') && img.closest('.tile').classList.add('tile--broken'); return; }
       tries++;
-      setTimeout(() => { img.src = `${T.photoUrl(photo.id, size)}&retry=${tries}`; }, 2500 * tries);
+      setTimeout(() => { img.src = `${T.photoUrl(stillId(photo), size)}&retry=${tries}`; }, 2500 * tries);
     });
   }
 
@@ -205,13 +229,21 @@
     const grid = $('#timeline-grid');
     grid.textContent = '';
     shown.forEach((photo, i) => {
-      const img = h('img', { src: imageFor(photo, 600), alt: photo.caption || (photo.from ? `Photo by ${photo.from}` : 'Wedding photo'), loading: 'lazy', decoding: 'async' });
+      const what = isVideo(photo) ? 'Video' : 'Photo';
+      const img = h('img', { src: imageFor(photo, 600), alt: photo.caption || (photo.from ? `${what} by ${photo.from}` : `Wedding ${what.toLowerCase()}`), loading: 'lazy', decoding: 'async' });
+      img.style.filter = T.filterCss(photo.filter);
       retryingImage(img, photo, 600);
-      grid.append(h('button', { type: 'button', class: 'tile', 'data-id': photo.id, onclick: () => openLightbox(i) }, img));
+      const badge = isVideo(photo) ? h('span', { class: 'tile__badge', 'aria-hidden': 'true' },
+        h('span', { class: 'tile__play' }), photo.seconds ? T.formatSeconds(photo.seconds) : '') : null;
+      grid.append(h('button', { type: 'button', class: `tile${isVideo(photo) ? ' tile--video' : ''}`, 'data-id': photo.id, onclick: () => openLightbox(i) }, img, badge));
     });
     const published = !!(data && data.album && data.album.published);
-    $('#timeline-count').textContent = photos.length ? (published ? plural(photos.length, 'photo') : `${plural(photos.length, 'photo')} from you`) : '';
-    $('#timeline-empty').textContent = published ? 'There are no photos in the album yet.' : "The photos you share will show up here. Only you can see them.";
+    const nVideos = photos.filter(isVideo).length;
+    const counted = nVideos && nVideos < photos.length
+      ? `${plural(photos.length - nVideos, 'photo')} and ${plural(nVideos, 'video')}`
+      : plural(photos.length, nVideos ? 'video' : 'photo');
+    $('#timeline-count').textContent = photos.length ? (published ? counted : `${counted} from you`) : '';
+    $('#timeline-empty').textContent = published ? 'There are no photos in the album yet.' : "The photos and videos you share will show up here. Only you can see them.";
     $('#timeline-empty').hidden = photos.length > 0;
     $('#timeline-note').hidden = published || !photos.length;
     $('.timeline__bar').hidden = photos.length < 2;
@@ -276,6 +308,8 @@
   /* ---------- choosing photos ---------- */
 
   let picked = [];
+  let pickedVideo = null; // a recording waiting for its name and note
+  let sheetFilter = '';
   const sheet = $('#share-sheet');
 
   // Phones and tablets get a "Take a photo" button that opens the camera straight away
@@ -286,8 +320,19 @@
     $('#camera-button').hidden = false;
     $('#choose-button').classList.add('btn--ghost');
     $('#choose-label').textContent = 'Choose photos';
-    $('#photos-hint').textContent = 'No app needed. Take one now, or pick some from your camera roll.';
+    $('#photos-hint').textContent = canRecord
+      ? 'No app needed. Take photos or short videos, or pick photos from your camera roll.'
+      : 'No app needed. Take one now, or pick some from your camera roll.';
   }
+
+  $('#video-button').addEventListener('click', () => {
+    if (videosLeft() <= 0) { renderAllowance(); return; }
+    window.VideoRecorder.open({
+      maxSeconds: videoInfo().seconds || 30,
+      filter: store.get('wedding.photoFilter'),
+      onDone: (clip) => { picked = []; pickedVideo = clip; openSheet(''); },
+    });
+  });
 
   $('#camera-input').addEventListener('change', onPicked);
   $('#photo-input').addEventListener('change', onPicked);
@@ -298,15 +343,16 @@
     const images = files.filter((f) => !f.type || f.type.startsWith('image/'));
     const skipped = files.length - images.length;
     if (!images.length) {
-      if (skipped) alert('Only photos can be shared here (not videos).');
+      if (skipped) alert(canRecord ? 'Videos from your camera roll can\'t be shared here. Tap "Record a video" to record one on this page instead.' : 'Only photos can be shared here.');
       return;
     }
     const left = photosLeft();
     if (left <= 0) { renderAllowance(); return; }
     const most = Math.min(MAX_PER_PICK, left);
     picked = images.slice(0, most);
+    pickedVideo = null;
     let note = '';
-    if (skipped) note = `${plural(skipped, 'video')} left out: only photos can be shared here.`;
+    if (skipped) note = `${plural(skipped, 'video')} left out: tap "Record a video" to record one here instead.`;
     if (images.length > most) {
       note = most === left
         ? `You have ${plural(left, 'photo')} left, so we'll share the first ${left}.`
@@ -316,9 +362,17 @@
   }
 
   function openSheet(note) {
-    $('#share-title').textContent = `Share ${plural(picked.length, 'photo')}`;
+    $('#share-title').textContent = pickedVideo ? 'Share your video' : `Share ${plural(picked.length, 'photo')}`;
     const previews = $('#share-previews');
     previews.textContent = '';
+    previews.classList.toggle('share-sheet__previews--video', !!pickedVideo);
+    if (pickedVideo) {
+      const url = URL.createObjectURL(pickedVideo.blob);
+      const v = h('video', { src: url, playsinline: true, muted: true, loop: true, autoplay: true, class: 'share-sheet__video' });
+      v.muted = true;
+      v.play().catch(() => {});
+      previews.append(v);
+    }
     picked.slice(0, 12).forEach((f) => {
       const url = URL.createObjectURL(f);
       const img = h('img', { src: url, alt: '' });
@@ -327,6 +381,10 @@
       previews.append(img);
     });
     if (picked.length > 12) previews.append(h('span', { class: 'share-sheet__more', text: `+${picked.length - 12}` }));
+    sheetFilter = pickedVideo ? pickedVideo.filter : store.get('wedding.photoFilter');
+    const showFilter = () => previews.querySelectorAll('img, video').forEach((m) => { m.style.filter = T.filterCss(sheetFilter); });
+    T.filterChips($('#share-filters'), sheetFilter, (f) => { sheetFilter = f; showFilter(); });
+    showFilter();
     const old = sheet.querySelector('.share-sheet__note');
     if (old) old.remove();
     if (note) previews.after(h('p', { class: 'share-sheet__note', text: note }));
@@ -340,18 +398,29 @@
   function closeSheet() {
     sheet.hidden = true;
     document.body.classList.remove('no-scroll');
+    const v = $('#share-previews video');
+    if (v) { URL.revokeObjectURL(v.src); v.removeAttribute('src'); v.load(); }
   }
 
-  $('#share-cancel').addEventListener('click', () => { picked = []; closeSheet(); });
-  sheet.addEventListener('click', (e) => { if (e.target === sheet) { picked = []; closeSheet(); } });
+  function cancelSheet() {
+    if (pickedVideo && !confirm('Throw this video away?')) return;
+    picked = [];
+    pickedVideo = null;
+    closeSheet();
+  }
+  $('#share-cancel').addEventListener('click', cancelSheet);
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) cancelSheet(); });
 
   $('#share-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const from = $('#share-from').value.trim().slice(0, 60);
     const caption = $('#share-caption').value.trim().slice(0, 200);
     store.set('wedding.photoFrom', from);
-    picked.forEach((file) => addUpload(file, from, caption));
+    store.set('wedding.photoFilter', sheetFilter);
+    if (pickedVideo) addUpload({ kind: 'video', video: pickedVideo }, from, caption, sheetFilter);
+    picked.forEach((file) => addUpload({ kind: 'photo', file }, from, caption, sheetFilter));
     picked = [];
+    pickedVideo = null;
     closeSheet();
     renderAllowance();
     pump();
@@ -362,17 +431,23 @@
 
   const newId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
-  function addUpload(file, from, caption) {
-    const item = { file, from, caption, id: newId(), state: 'waiting', message: '' };
+  // `what` is { kind: 'photo', file } or { kind: 'video', video } (from the recorder).
+  function addUpload(what, from, caption, filter) {
+    const item = { ...what, from, caption, filter: filter || '', id: newId(), state: 'waiting', message: '', progress: 0 };
     const thumb = h('span', { class: 'upload__thumb' });
     const status = h('span', { class: 'upload__status' });
+    const bar = h('span', { class: 'upload__bar' });
     const retry = h('button', { type: 'button', class: 'upload__retry', hidden: true, text: 'Try again', onclick: () => { item.state = 'waiting'; update(item); pump(); } });
-    item.el = h('li', { class: 'upload' }, thumb, h('span', { class: 'upload__body' }, status, h('span', { class: 'upload__bar' })), retry);
-    item.parts = { thumb, status, retry };
-    const url = URL.createObjectURL(file);
-    const img = h('img', { src: url, alt: '' });
-    img.addEventListener('error', () => img.remove(), { once: true });
-    thumb.append(img);
+    item.el = h('li', { class: 'upload', 'data-kind': item.kind }, thumb, h('span', { class: 'upload__body' }, status, bar), retry);
+    item.parts = { thumb, status, retry, bar };
+    const source = item.kind === 'video' ? item.video.poster : item.file;
+    if (source) {
+      const url = URL.createObjectURL(source);
+      const img = h('img', { src: url, alt: '' });
+      img.style.filter = T.filterCss(item.filter);
+      img.addEventListener('error', () => img.remove(), { once: true });
+      thumb.append(img);
+    }
     uploads.push(item);
     $('#upload-list').append(item.el);
     $('#upload-queue').hidden = false;
@@ -383,16 +458,20 @@
 
   function update(item) {
     item.el.dataset.state = item.state;
-    item.parts.status.textContent = item.state === 'failed' ? item.message : LABELS[item.state];
+    let label = item.state === 'failed' ? item.message : LABELS[item.state];
+    if (item.kind === 'video' && item.state === 'uploading') label = `Sharing your video… ${Math.round(item.progress * 100)}%`;
+    item.parts.status.textContent = label;
+    item.parts.bar.style.setProperty('--progress', String(item.progress || 0));
     item.parts.retry.hidden = !(item.state === 'failed' && item.canRetry);
     const total = uploads.length;
     const done = uploads.filter((u) => u.state === 'done').length;
     const failed = uploads.filter((u) => u.state === 'failed').length;
     const busy = total - done - failed;
     const line = $('#upload-status');
+    const one = total === 1 ? (uploads[0].kind === 'video' ? 'Your video is' : 'Your photo is') : `All ${total} are`;
     if (busy) line.textContent = `Sharing ${done + 1 > total ? total : done + 1} of ${total}… Please keep this page open until it's done.`;
-    else if (failed) line.textContent = `${plural(done, 'photo')} shared. ${plural(failed, 'photo')} didn't make it. Tap "Try again", or try again later if the signal is weak.`;
-    else line.textContent = `${total === 1 ? 'Your photo is' : `All ${total} photos are`} shared. Thank you!`;
+    else if (failed) line.textContent = `${done} shared. ${failed} didn't make it. Tap "Try again", or try again later if the signal is weak.`;
+    else line.textContent = `${one} shared. Thank you!`;
     if (!busy && !failed) {
       clearTimeout(update.hideTimer);
       update.hideTimer = setTimeout(() => {
@@ -413,10 +492,11 @@
     }
   }
 
-  const NO_RETRY = new Set(['closed', 'bad_photo', 'too_large', 'not_found', 'bad_request', 'not_ready', 'limit_reached']);
+  const NO_RETRY = new Set(['closed', 'bad_photo', 'bad_video', 'too_large', 'too_long', 'no_videos', 'not_found', 'bad_request', 'not_ready', 'limit_reached', 'rate_limited']);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function send(item) {
+    if (item.kind === 'video') return sendVideo(item);
     item.state = 'preparing';
     update(item);
     let prepared;
@@ -433,7 +513,7 @@
     const payload = {
       code, data: base64, from: item.from, caption: item.caption, table,
       takenAt: prepared.takenAt ? prepared.takenAt.toISOString() : '',
-      width: prepared.width, height: prepared.height, uploadId: item.id, me, device,
+      width: prepared.width, height: prepared.height, uploadId: item.id, me, device, filter: item.filter,
     };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -452,6 +532,69 @@
         else return fail(item, 'The connection dropped.', true);
       }
     }
+  }
+
+  // Videos go up in 2 MB pieces (start, pieces, finish), so a weak signal only has to resend
+  // the piece that dropped, not the whole video.
+  async function sendVideo(item) {
+    const v = item.video;
+    item.state = 'uploading';
+    update(item);
+    let poster = '';
+    try { poster = v.poster ? await T.blobToBase64(v.poster) : ''; } catch (err) { /* no still is fine */ }
+    const base = { code, uploadId: item.id };
+    const meta = {
+      ...base, mime: v.mime, size: v.blob.size, seconds: v.seconds, width: v.width, height: v.height, filter: item.filter,
+      takenAt: v.takenAt ? v.takenAt.toISOString() : '', from: item.from, caption: item.caption, table, me, device,
+    };
+    // Retries one step a few times when the connection hiccups.
+    async function step(payload) {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await API.videoStep(payload);
+        } catch (err) {
+          const again = err && ['network', 'upload_failed', 'server_error'].includes(err.code);
+          if (!again || attempt >= 3) throw err;
+          await sleep(2500 * (attempt + 1));
+        }
+      }
+    }
+    for (let round = 0; round < 3; round++) {
+      try {
+        let r = await step({ step: 'start', ...meta });
+        if (!r.complete) {
+          const size = v.blob.size;
+          const piece = r.chunkSize || 2 * 1024 * 1024;
+          let offset = r.received || 0;
+          while (offset < size) {
+            const data = await T.blobToBase64(v.blob.slice(offset, offset + piece));
+            r = await step({ step: 'chunk', ...base, offset, data });
+            offset = r.received;
+            item.progress = Math.min(0.97, offset / size);
+            update(item);
+          }
+          r = await step({ step: 'finish', ...base, poster });
+        }
+        item.state = 'done';
+        item.progress = 1;
+        if (r.you) data.you = r.you;
+        update(item);
+        renderAllowance();
+        if (r.photo && r.photo.id) {
+          const posterUrl = v.poster ? URL.createObjectURL(v.poster) : '';
+          localVideo.set(r.photo.id, URL.createObjectURL(v.blob));
+          addToTimeline(r.photo, posterUrl);
+        }
+        item.video = { ...v, blob: null, poster: null }; // let the phone free the memory
+        return;
+      } catch (err) {
+        if (err && err.code === 'limit_reached' && data.you && data.you.videos) data.you.videos.left = 0;
+        if (err && NO_RETRY.has(err.code)) return fail(item, err.message || 'This video could not be shared.', false);
+        if (err && (err.code === 'upload_expired' || err.code === 'upload_incomplete')) { item.progress = 0; continue; } // start over
+        return fail(item, 'The connection dropped.', true);
+      }
+    }
+    return fail(item, 'The connection dropped.', true);
   }
 
   function fail(item, message, canRetry) {
@@ -483,23 +626,60 @@
 
   const lightbox = $('#lightbox');
   const lightboxImg = $('#lightbox-img');
+  const lightboxVideo = $('#lightbox-video');
   let current = 0;
+
+  function clearVideo() {
+    const v = lightboxVideo.querySelector('video');
+    if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
+    lightboxVideo.textContent = '';
+    lightboxVideo.hidden = true;
+  }
+
+  // Plays a video in the lightbox, with its filter. If the browser can't play Drive's file
+  // directly (still processing, or a WebM on an iPhone), Google Drive's own player takes over.
+  function showVideo(p) {
+    clearVideo();
+    lightboxImg.hidden = true;
+    lightboxImg.removeAttribute('src');
+    const mine = localVideo.get(p.id);
+    const v = h('video', { controls: true, playsinline: true, autoplay: true, preload: 'metadata', poster: imageFor(p, 1200), class: 'lightbox__img' });
+    v.style.filter = T.filterCss(p.filter);
+    v.addEventListener('error', () => {
+      if (mine || !/^[A-Za-z0-9_-]{10,}$/.test(p.id)) return;
+      lightboxVideo.textContent = '';
+      lightboxVideo.append(h('iframe', { src: `https://drive.google.com/file/d/${encodeURIComponent(p.id)}/preview`, allow: 'autoplay; fullscreen', title: 'Video', class: 'photo-lightbox__frame' }));
+    }, { once: true });
+    v.src = mine || T.videoUrl(p.id);
+    lightboxVideo.append(v);
+    lightboxVideo.hidden = false;
+  }
 
   function showPhoto(i) {
     if (!shown.length) return;
     current = (i + shown.length) % shown.length;
     const p = shown[current];
-    // Show the small version (already loaded) at once, then swap in the full-size one.
-    const small = imageFor(p, 600);
-    const big = imageFor(p, 2000);
-    lightboxImg.src = small;
-    if (big !== small) {
-      const full = new Image();
-      full.onload = () => { if (shown[current] === p) lightboxImg.src = big; };
-      full.src = big;
+    const what = isVideo(p) ? 'Video' : 'Photo';
+    if (isVideo(p)) {
+      showVideo(p);
+    } else {
+      clearVideo();
+      lightboxImg.hidden = false;
+      lightboxImg.style.filter = T.filterCss(p.filter);
     }
-    lightboxImg.alt = p.caption || (p.from ? `Photo by ${p.from}` : 'Wedding photo');
-    const meta = [p.from ? `Photo by ${p.from}` : '', p.table ? `Table ${p.table}` : '', T.takenTime(p)].filter(Boolean).join(' · ');
+    // Show the small version (already loaded) at once, then swap in the full-size one.
+    if (!isVideo(p)) {
+      const small = imageFor(p, 600);
+      const big = imageFor(p, 2000);
+      lightboxImg.src = small;
+      if (big !== small) {
+        const full = new Image();
+        full.onload = () => { if (shown[current] === p) lightboxImg.src = big; };
+        full.src = big;
+      }
+      lightboxImg.alt = p.caption || (p.from ? `Photo by ${p.from}` : 'Wedding photo');
+    }
+    const meta = [p.from ? `${what} by ${p.from}` : '', p.table ? `Table ${p.table}` : '', T.takenTime(p)].filter(Boolean).join(' · ');
     const caption = $('#lightbox-caption');
     caption.textContent = '';
     if (p.caption) caption.append(h('span', { class: 'photo-lightbox__note', text: p.caption }));
@@ -514,6 +694,7 @@
   function closeLightbox() {
     lightbox.hidden = true;
     lightboxImg.removeAttribute('src');
+    clearVideo();
     document.body.classList.remove('no-scroll');
     const tile = shown[current] && document.querySelector(`.tile[data-id="${CSS.escape(shown[current].id)}"]`);
     if (tile) tile.focus({ preventScroll: true });
@@ -525,7 +706,7 @@
     else if (action === 'next') showPhoto(current + 1);
   });
   document.addEventListener('keydown', (e) => {
-    if (!sheet.hidden && e.key === 'Escape') { picked = []; closeSheet(); return; }
+    if (!sheet.hidden && e.key === 'Escape') { cancelSheet(); return; }
     if (lightbox.hidden) return;
     if (e.key === 'Escape') closeLightbox();
     else if (e.key === 'ArrowLeft') showPhoto(current - 1);

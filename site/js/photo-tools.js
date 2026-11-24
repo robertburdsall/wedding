@@ -1,6 +1,6 @@
-// Helpers shared by the photo pages (photos.js, slideshow.js, cards.js):
-// reading when a photo was taken, shrinking photos before upload, building image links,
-// and drawing QR codes.
+// Helpers shared by the photo pages (photos.js, slideshow.js, cards.js, recorder.js, highlight.js):
+// reading when a photo was taken, shrinking photos before upload, building image and video
+// links, filters, video stills, and drawing QR codes.
 (function (root) {
   'use strict';
 
@@ -131,6 +131,113 @@
     return template.replace('{id}', encodeURIComponent(id)).replace('{size}', String(size));
   }
 
+  // A video, served by Google Drive (or the dev server locally).
+  function videoUrl(id) {
+    if (!DRIVE_ID.test(String(id))) return '';
+    const cfg = root.WEDDING_CONFIG || {};
+    const template = cfg.videoUrl || 'https://drive.google.com/uc?export=download&id={id}';
+    return template.replace('{id}', encodeURIComponent(id));
+  }
+
+  /* ---------- Filters ----------
+   * Only the filter's name is saved with a photo or video; the file itself always stays
+   * the original. The same CSS filter is used everywhere it's shown (and by the highlight
+   * builder when it draws frames), so turning a filter off later is just clearing the name.
+   * The names must match PHOTO_FILTERS in apps-script/Code.gs. */
+  const FILTERS = {
+    Warm: 'sepia(0.22) saturate(1.3) hue-rotate(-6deg) brightness(1.04)',
+    Film: 'contrast(1.12) saturate(0.85) sepia(0.15) brightness(1.03)',
+    'B&W': 'grayscale(1) contrast(1.12) brightness(1.03)',
+    Soft: 'brightness(1.08) saturate(0.9) contrast(0.9)',
+    Vivid: 'saturate(1.45) contrast(1.08)',
+    Cool: 'saturate(1.05) hue-rotate(10deg) brightness(1.04) contrast(1.02)',
+    Vintage: 'sepia(0.45) contrast(0.95) brightness(1.06) saturate(0.85)',
+  };
+  const FILTER_NAMES = Object.keys(FILTERS);
+  const filterCss = (name) => FILTERS[name] || 'none';
+
+  // A row of filter buttons ("Original", "Warm", ...). Calls onChange(name) ('' = none).
+  function filterChips(container, current, onChange) {
+    container.textContent = '';
+    container.setAttribute('role', 'radiogroup');
+    const names = [''].concat(FILTER_NAMES);
+    const buttons = names.map((name) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'filter-chip';
+      b.setAttribute('role', 'radio');
+      b.dataset.filter = name;
+      const swatch = document.createElement('span');
+      swatch.className = 'filter-chip__swatch';
+      swatch.style.filter = filterCss(name);
+      const label = document.createElement('span');
+      label.textContent = name || 'Original';
+      b.append(swatch, label);
+      b.addEventListener('click', () => { set(name); onChange(name); });
+      container.append(b);
+      return b;
+    });
+    function set(name) {
+      buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.filter === name)));
+    }
+    set(current || '');
+    return { set };
+  }
+
+  /* ---------- Videos ---------- */
+
+  // "0:07", "1:30"
+  function formatSeconds(s) {
+    const n = Math.max(0, Math.round(Number(s) || 0));
+    return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+  }
+
+  // A JPEG still from near the start of a recorded video, plus its size. Resolves to
+  // { poster (Blob or null), width, height }. Never rejects: a missing still isn't fatal.
+  function videoStill(blob, maxSide = 720) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      const v = document.createElement('video');
+      let done = false;
+      const finish = (poster) => {
+        if (done) return;
+        done = true;
+        const out = { poster, width: v.videoWidth || 0, height: v.videoHeight || 0 };
+        v.removeAttribute('src');
+        v.load();
+        URL.revokeObjectURL(url);
+        resolve(out);
+      };
+      const timer = setTimeout(() => finish(null), 6000);
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = 'auto';
+      v.addEventListener('error', () => { clearTimeout(timer); finish(null); });
+      v.addEventListener('loadeddata', async () => {
+        try {
+          // Some phones only draw a frame once the video has played a moment.
+          await v.play().catch(() => {});
+          v.pause();
+          if (v.currentTime < 0.05) {
+            await new Promise((r) => { v.addEventListener('seeked', r, { once: true }); v.currentTime = 0.1; setTimeout(r, 1500); });
+          }
+          const w0 = v.videoWidth, h0 = v.videoHeight;
+          if (!w0 || !h0) { clearTimeout(timer); return finish(null); }
+          const scale = Math.min(1, maxSide / Math.max(w0, h0));
+          const c = document.createElement('canvas');
+          c.width = Math.round(w0 * scale);
+          c.height = Math.round(h0 * scale);
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          c.toBlob((b) => { clearTimeout(timer); finish(b); }, 'image/jpeg', 0.82);
+        } catch (err) {
+          clearTimeout(timer);
+          finish(null);
+        }
+      }, { once: true });
+      v.src = url;
+    });
+  }
+
   /* ---------- Timeline ---------- */
 
   function takenTime(photo) {
@@ -189,7 +296,8 @@
   }
 
   root.PhotoTools = {
-    readExifDate, preparePhoto, blobToBase64, photoUrl, takenTime,
+    readExifDate, preparePhoto, blobToBase64, photoUrl, videoUrl, takenTime,
     qrSvg, photoPageUrl, normalizeCode, photoCodeFromPage, MAX_SIDE,
+    FILTERS, FILTER_NAMES, filterCss, filterChips, formatSeconds, videoStill,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

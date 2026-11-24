@@ -11,8 +11,9 @@ window.WEDDING_CONFIG = {
   registryEmbedUrl: '',
   registryName: 'our registry',
 
-  // Where photos shared from the reception tables are shown from (Google Drive). No need to change.
+  // Where photos and videos shared from the reception are shown from (Google Drive). No need to change.
   photoUrl: 'https://drive.google.com/thumbnail?id={id}&sz=w{size}',
+  videoUrl: 'https://drive.google.com/uc?export=download&id={id}',
 
   // Never put the date, time or location here: this file is public.
 };

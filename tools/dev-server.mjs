@@ -97,13 +97,23 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
         const real = await readFile(path.join(siteDir, 'js', 'config.js'), 'utf8');
         res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Cache-Control': 'no-store' });
         return res.end(real.replace(/apiUrl:\s*'[^']*'/, `apiUrl: '${apiUrl}'`)
-          .replace(/photoUrl:\s*'[^']*'/, `photoUrl: '${siteUrl}/__drive/{id}?sz=w{size}'`));
+          .replace(/photoUrl:\s*'[^']*'/, `photoUrl: '${siteUrl}/__drive/{id}?sz=w{size}'`)
+          .replace(/videoUrl:\s*'[^']*'/, `videoUrl: '${siteUrl}/__drive/{id}'`));
       }
       // Stands in for Google Drive's image links: serves photos "uploaded" to the fake Drive.
       if (url.pathname.startsWith('/__drive/')) {
         const file = env.drive.files.get(decodeURIComponent(url.pathname.slice('/__drive/'.length)));
         if (!file || file.trashed) { res.writeHead(404); return res.end(); }
-        res.writeHead(200, { 'Content-Type': file.contentType, 'Cache-Control': 'no-store' });
+        // Videos need byte ranges so the browser can seek.
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+        if (range) {
+          const size = file.bytes.length;
+          const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+          const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          res.writeHead(206, { 'Content-Type': file.contentType, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store' });
+          return res.end(file.bytes.subarray(start, end + 1));
+        }
+        res.writeHead(200, { 'Content-Type': file.contentType, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' });
         return res.end(file.bytes);
       }
       if (url.pathname === '/__sheet') return sendHtml(res, renderSheets(env));
@@ -182,7 +192,8 @@ export async function startDevServers({ sitePort = 5173, apiPort = 5174, guests 
     const s = env.gs.readSettings_(c);
     console.log(`  Photo album:  ${s['Photo Page Link']}&table=4`);
     console.log(`  Slideshow:    ${s['Photo Slideshow Link']}`);
-    console.log(`  Table cards:  ${s['Photo Table Cards Link']}\n`);
+    console.log(`  Table cards:  ${s['Photo Table Cards Link']}`);
+    console.log(`  Highlight:    ${s['Highlight Builder Link']}\n`);
     console.log('  Sample invitations:');
     for (const l of links) console.log(`    ${l.link}   ${l.names} (${l.type}${l.plusOne === 'Yes' ? ', +1' : ''})`);
     console.log('');

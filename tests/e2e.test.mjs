@@ -131,12 +131,36 @@ describe('website ↔ Apps Script over HTTP', () => {
     assert.ok(!someoneElse.photos.some((p) => p.id === res.photo.id));
     // Each phone's photo count comes back with the list.
     await api.uploadPhoto({ code: t, data: jpeg, device: 'e2e-phone-1', uploadId: 'e2e-2' });
-    assert.deepEqual((await api.getPhotos(t, { device: 'e2e-phone-1' })).you, { limit: 20, used: 2, left: 18, name: '' });
+    assert.deepEqual((await api.getPhotos(t, { device: 'e2e-phone-1' })).you, { limit: 50, used: 2, left: 48, name: '', videos: { limit: 10, used: 0, left: 10, seconds: 30 } });
     await assert.rejects(api.getPhotos('WRONGCODE'), (err) => err.code === 'not_found');
     // The dev server serves the "Drive" file so the pages can be previewed locally.
     const img = await fetch(`${dev.siteUrl}/__drive/${res.photo.id}?sz=w600`);
     assert.equal(img.status, 200);
     assert.equal(img.headers.get('content-type'), 'image/jpeg');
+  });
+
+  test('a video goes up in pieces over HTTP, and the highlight builder can read it back', async () => {
+    const s = dev.env.gs.readSettings_(dev.env.gs.ctx_());
+    const bytes = Buffer.from(Array.from({ length: 300 * 1024 }, (_, i) => (i * 31) & 255));
+    const uploadId = 'e2e-video-1';
+    log.length = 0;
+    let r = await api.videoStep({ step: 'start', code: s['Photo Code'], uploadId, mime: 'video/webm;codecs=vp9', size: bytes.length, seconds: 6, device: 'e2e-video-phone', filter: 'Soft' });
+    assert.ok(!log.includes('preflight'));
+    let offset = r.received;
+    const pieceSize = r.chunkSize;
+    assert.equal(pieceSize % (256 * 1024), 0);
+    while (offset < bytes.length) {
+      r = await api.videoStep({ step: 'chunk', code: s['Photo Code'], uploadId, offset, data: bytes.subarray(offset, offset + pieceSize).toString('base64') });
+      offset = r.received;
+    }
+    const done = await api.videoStep({ step: 'finish', code: s['Photo Code'], uploadId, poster: '' });
+    assert.equal(done.photo.kind, 'video');
+    assert.equal(done.photo.filter, 'Soft');
+    const review = await api.getReview(s['Review Code']);
+    assert.ok(review.items.some((i) => i.id === done.photo.id && i.kind === 'video'));
+    const piece = await api.getMedia(s['Review Code'], done.photo.id, 0);
+    assert.ok(Buffer.from(piece.data, 'base64').equals(bytes));
+    await assert.rejects(api.getReview(s['Photo Code']), (err) => err.code === 'not_found');
   });
 
   test('server errors come back as ApiError with the server message', async () => {
@@ -183,7 +207,7 @@ describe('static site', () => {
   after(() => dev.close());
 
   test('pages are served, and the dev config points at the fake API', async () => {
-    for (const p of ['/', '/invite/', `/invite/?code=${dev.links[0].code}`, '/meal/', '/photos/', '/photos/slideshow.html', '/photos/cards.html']) {
+    for (const p of ['/', '/invite/', `/invite/?code=${dev.links[0].code}`, '/meal/', '/photos/', '/photos/slideshow.html', '/photos/cards.html', '/photos/highlight.html']) {
       const res = await fetch(dev.siteUrl + p);
       assert.equal(res.status, 200, p);
       assert.match(res.headers.get('content-type'), /text\/html/);
@@ -191,6 +215,15 @@ describe('static site', () => {
     const cfg = await (await fetch(`${dev.siteUrl}/js/config.js`)).text();
     assert.ok(cfg.includes(dev.apiUrl));
     assert.ok(cfg.includes(`${dev.siteUrl}/__drive/{id}`));
+    assert.ok(cfg.includes(`videoUrl: '${dev.siteUrl}/__drive/{id}'`));
+  });
+
+  test('the fake Drive serves byte ranges, so videos can be scrubbed', async () => {
+    const file = [...dev.env.drive.files.values()][0] || dev.env.gs.DriveApp.createFolder('t').createFile(dev.env.gs.Utilities.newBlob([1, 2, 3, 4, 5, 6], 'video/mp4', 'v.mp4'));
+    const res = await fetch(`${dev.siteUrl}/__drive/${file.id}`, { headers: { Range: 'bytes=2-4' } });
+    assert.equal(res.status, 206);
+    assert.equal(res.headers.get('content-range'), `bytes 2-4/${file.bytes.length}`);
+    assert.deepEqual([...new Uint8Array(await res.arrayBuffer())], [...file.bytes.subarray(2, 5)]);
   });
 
   test('/invite redirects to /invite/ like GitHub Pages', async () => {
@@ -205,7 +238,7 @@ describe('static site', () => {
   });
 
   test('every local file referenced by the HTML exists', () => {
-    for (const page of ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html']) {
+    for (const page of ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html', 'photos/highlight.html']) {
       const html = readFileSync(site(page), 'utf8');
       const refs = [...html.matchAll(/(?:href|src|srcset)="([^"#]+)"/g)].map((m) => m[1]).filter((u) => !/^(https?:|mailto:|data:)/.test(u));
       assert.ok(refs.length > 3, page);
@@ -218,9 +251,9 @@ describe('static site', () => {
   });
 
   test('the public website files contain no date, time or year', () => {
-    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html',
+    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html', 'photos/highlight.html',
       'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js',
-      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js'];
+      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js', 'js/recorder.js', 'js/highlight.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i, f);
@@ -246,9 +279,9 @@ describe('static site', () => {
   });
 
   test('the public site never contains guest or reception details', () => {
-    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html',
+    const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html', 'photos/highlight.html',
       'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js',
-      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js'];
+      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js', 'js/recorder.js', 'js/highlight.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /Reception Venue|Reception Address|@gmail\.com/i, f);
@@ -311,6 +344,22 @@ describe('photo page helpers (js/photo-tools.js)', () => {
     assert.equal(loadTools({ photoUrl: 'http://x/__drive/{id}?sz=w{size}' }).photoUrl('1AbC_def-123456', 2000), 'http://x/__drive/1AbC_def-123456?sz=w2000');
     assert.equal(loadTools().photoUrl('"><script>', 600), '');
     assert.equal(loadTools().photoUrl('short', 600), '');
+  });
+
+  test('video links, filters and times', () => {
+    const T = loadTools();
+    assert.equal(T.videoUrl('1AbC_def-123456'), 'https://drive.google.com/uc?export=download&id=1AbC_def-123456');
+    assert.equal(loadTools({ videoUrl: 'http://x/__drive/{id}' }).videoUrl('1AbC_def-123456'), 'http://x/__drive/1AbC_def-123456');
+    assert.equal(T.videoUrl('"><script>'), '');
+    // The filter names match the ones the Apps Script accepts.
+    const gs = readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8');
+    const names = JSON.parse(gs.match(/var PHOTO_FILTERS = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
+    assert.deepEqual([...T.FILTER_NAMES], names);
+    assert.equal(T.filterCss(''), 'none');
+    assert.equal(T.filterCss('nope'), 'none');
+    assert.match(T.filterCss('B&W'), /grayscale\(1\)/);
+    assert.equal(T.formatSeconds(7.4), '0:07');
+    assert.equal(T.formatSeconds(90), '1:30');
   });
 
 

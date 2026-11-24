@@ -51,6 +51,7 @@
   async function poll() {
     try {
       const d = await API.getPhotos(code);
+      d.photos = d.photos.filter((p) => p.kind !== 'video'); // the slideshow is photos only
       const ids = new Set(d.photos.map((p) => p.id));
       for (const p of d.photos) {
         if (seen.has(p.id)) continue;
@@ -100,6 +101,7 @@
     if (!(await preload(url))) { timer = setTimeout(next, 2000); return; }
     const back = slides[1 - front];
     back.querySelector('img').src = url;
+    back.querySelector('img').style.filter = T.filterCss(p.filter);
     back.querySelector('.slide__bg').style.backgroundImage = `url("${url}")`;
     back.classList.add('is-on');
     slides[front].classList.remove('is-on');

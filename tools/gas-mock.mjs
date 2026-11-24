@@ -1,5 +1,6 @@
 // A small in-memory imitation of the Google Apps Script services Code.gs uses
-// (SpreadsheetApp, MailApp, LockService, ContentService, Utilities, Session, CacheService, DriveApp, ScriptApp).
+// (SpreadsheetApp, MailApp, LockService, ContentService, Utilities, Session, CacheService, DriveApp, ScriptApp,
+// and UrlFetchApp for the Drive upload/download API that videos use).
 // It runs the real Code.gs file unchanged inside a Node VM so it can be tested locally.
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -223,7 +224,9 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
   };
 
   // DriveApp: folders and files kept in memory (drive.folders / drive.files).
-  const drive = { folders: new Map(), files: new Map(), failSharing: false };
+  // drive.sessions: resumable uploads in progress. drive.failPieces: how many upload pieces to
+  // fail (like a Drive hiccup). drive.fetches: every UrlFetchApp call.
+  const drive = { folders: new Map(), files: new Map(), failSharing: false, sessions: new Map(), failPieces: 0, fetches: [] };
   const triggers = [];
   const driveId = () => '1' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 8);
   function makeFile(blob, folder) {
@@ -239,6 +242,8 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
         return this;
       },
       setTrashed(v) { this.trashed = !!v; return this; },
+      getSize() { return this.bytes.length; },
+      getMimeType() { return this.contentType; },
       moveTo(folder) { this.folder = folder.id; return this; },
       setDescription(d) { this.description = d; return this; },
     };
@@ -313,6 +318,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
       computeDigest: (algorithm, text) => Array.from(createHash(algorithm).update(String(text), 'utf8').digest(), (b) => (b > 127 ? b - 256 : b)),
       // Like Apps Script: bytes are signed (-128..127).
       base64Decode: (s) => Array.from(Buffer.from(String(s), 'base64'), (b) => (b > 127 ? b - 256 : b)),
+      base64Encode: (bytes) => Buffer.from(Array.from(bytes, (b) => b & 255)).toString('base64'),
       newBlob: (bytes, contentType, name) => ({
         bytes: Buffer.from(Array.from(bytes, (b) => b & 255)),
         getBytes() { return Array.from(this.bytes, (b) => (b > 127 ? b - 256 : b)); },
@@ -353,7 +359,64 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
     },
     Session: { getScriptTimeZone: () => timeZone, getActiveUser: () => ({ getEmail: () => ownerEmail }) },
     // Time-driven triggers, kept in `triggers` so tests can see what's installed.
+    // Just enough of the Drive REST API: resumable uploads (start, then pieces) and reading
+    // part of a file. Real Drive answers 308 for "keep going", which must not be followed.
+    UrlFetchApp: {
+      fetch(url, params = {}) {
+        const method = String(params.method || 'get').toLowerCase();
+        const headers = params.headers || {};
+        drive.fetches.push({ url, method, headers: { ...headers } });
+        const respond = (code, hdrs = {}, body = '') => {
+          const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+          return {
+            getResponseCode: () => code,
+            getHeaders: () => hdrs,
+            getContentText: () => buf.toString('utf8'),
+            getContent: () => Array.from(buf, (b) => (b > 127 ? b - 256 : b)),
+          };
+        };
+        if (headers.Authorization !== 'Bearer mock-oauth-token') return respond(401, {}, 'Login required');
+        if (params.muteHttpExceptions !== true) throw new Error('mock: always pass muteHttpExceptions');
+        if (method === 'post' && url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable')) {
+          const meta = JSON.parse(params.payload);
+          if (!drive.folders.has(meta.parents && meta.parents[0])) return respond(404, {}, 'File not found');
+          const location = `https://mock-drive-upload.test/session/${randomUUID()}`;
+          drive.sessions.set(location, {
+            meta, size: Number(headers['X-Upload-Content-Length']), mime: headers['X-Upload-Content-Type'], pieces: [], received: 0,
+          });
+          return respond(200, { Location: location });
+        }
+        if (method === 'put' && url.startsWith('https://mock-drive-upload.test/')) {
+          if (params.followRedirects !== false) throw new Error('mock: a 308 reply would be followed as a redirect');
+          const s = drive.sessions.get(url);
+          if (!s) return respond(404, {}, 'Upload session not found');
+          if (drive.failPieces > 0) { drive.failPieces--; return respond(503, {}, 'Backend Error'); }
+          const m = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(headers['Content-Range'] || '');
+          const bytes = Buffer.from(Array.from(params.payload, (b) => b & 255));
+          if (!m || Number(m[3]) !== s.size || bytes.length !== Number(m[2]) - Number(m[1]) + 1) return respond(400, {}, 'Bad Content-Range');
+          if (Number(m[1]) !== s.received) return respond(400, {}, 'Piece out of order');
+          if (Number(m[2]) + 1 < s.size && bytes.length % (256 * 1024) !== 0) return respond(400, {}, 'Pieces must be multiples of 256 KB');
+          s.pieces.push(bytes);
+          s.received += bytes.length;
+          if (s.received < s.size) return respond(308, { Range: `bytes=0-${s.received - 1}` });
+          const folder = drive.folders.get(s.meta.parents[0]);
+          const file = makeFile({ getName: () => s.meta.name, bytes: Buffer.concat(s.pieces), getContentType: () => s.mime }, folder);
+          file.description = s.meta.description || '';
+          drive.sessions.delete(url);
+          return respond(200, {}, JSON.stringify({ id: file.id }));
+        }
+        const media = /^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/([^?/]+)\?alt=media/.exec(url);
+        if (method === 'get' && media) {
+          const f = drive.files.get(media[1]);
+          if (!f) return respond(404, {}, 'File not found');
+          const r = /^bytes=(\d+)-(\d+)$/.exec(headers.Range || '');
+          return r ? respond(206, {}, f.bytes.subarray(Number(r[1]), Number(r[2]) + 1)) : respond(200, {}, f.bytes);
+        }
+        return respond(404, {}, `mock: unknown request ${method} ${url}`);
+      },
+    },
     ScriptApp: {
+      getOAuthToken: () => 'mock-oauth-token',
       getProjectTriggers: () => triggers.slice(),
       deleteTrigger(t) { const i = triggers.indexOf(t); if (i >= 0) triggers.splice(i, 1); },
       newTrigger(handler) {

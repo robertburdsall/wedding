@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Highlight Builder · Stephanie &amp; Robert</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#15322a">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500&family=Pinyon+Script&display=swap">
+  <link rel="stylesheet" href="../css/theme.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/invite.css">
+  <link rel="stylesheet" href="../css/photos.css">
+  <link rel="stylesheet" href="../css/highlight.css">
+</head>
+<body class="hl">
+  <!-- Just for the couple (photos/highlight.html?k=REVIEWCODE, from the Settings tab). It shows
+       every photo and video guests shared and puts the highlight video together right here in
+       the browser. Nothing is made automatically: you pick, trim and order everything. -->
+  <header class="hl-top">
+    <a href="../" class="hl-top__brand monogram">S &amp; R</a>
+    <div class="hl-top__text">
+      <h1 class="hl-top__title">Highlight builder</h1>
+      <p class="hl-top__sub" id="hl-sub">Pick clips and photos, trim them, put them in order, then make the video.</p>
+    </div>
+  </header>
+
+  <main id="app" data-state="loading">
+    <section class="state state--loading">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Loading everything guests shared…</p>
+    </section>
+
+    <section class="state state--error">
+      <div class="panel hl-error">
+        <h2 class="panel__title" id="error-title">We couldn't open the builder</h2>
+        <p id="error-message"></p>
+        <form class="code-form" id="code-form" novalidate>
+          <label for="code-input" class="visually-hidden">Review code</label>
+          <input class="input code-form__input" id="code-input" placeholder="Review code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20">
+          <button class="btn" type="submit">Open</button>
+        </form>
+        <p class="hl-hint">Use the <b>Highlight Builder Link</b> from the Settings tab of your guest list sheet.</p>
+      </div>
+    </section>
+
+    <section class="state state--ready">
+      <p class="hl-warning" id="hl-browser" hidden>For the best results, use Google Chrome on a computer. This browser might not be able to make the video.</p>
+      <div class="hl-grid">
+        <!-- Everything guests shared -->
+        <aside class="hl-panel hl-library">
+          <div class="hl-panel__head">
+            <h2 class="hl-panel__title">Shared by guests</h2>
+            <p class="hl-panel__count" id="library-count"></p>
+          </div>
+          <div class="hl-tabs" role="group" aria-label="Show">
+            <button type="button" class="chip" data-show="all" aria-pressed="true">All</button>
+            <button type="button" class="chip" data-show="video" aria-pressed="false">Videos</button>
+            <button type="button" class="chip" data-show="photo" aria-pressed="false">Photos</button>
+          </div>
+          <label class="hl-check"><input type="checkbox" id="show-hidden"> Show ones you hid on the sheet</label>
+          <div class="hl-library__grid" id="library"></div>
+          <p class="hl-empty" id="library-empty" hidden>Nothing here yet.</p>
+        </aside>
+
+        <!-- Preview and the running order -->
+        <section class="hl-panel hl-main">
+          <div class="hl-stage" id="stage-box">
+            <canvas class="hl-stage__canvas" id="stage"></canvas>
+            <video class="hl-stage__media" id="clip-player" controls playsinline hidden></video>
+            <img class="hl-stage__media" id="photo-player" alt="" hidden>
+            <p class="hl-stage__note" id="stage-note">Add clips and photos from the left, then select one here to trim it.</p>
+          </div>
+          <div class="hl-transport">
+            <button type="button" class="btn" id="play-all" disabled>&#9654;&nbsp; Preview the highlight</button>
+            <button type="button" class="btn btn--ghost" id="stop" hidden>Stop</button>
+            <span class="hl-total" id="total"></span>
+          </div>
+
+          <div class="hl-edit" id="edit" hidden>
+            <p class="hl-edit__title" id="edit-title"></p>
+            <div class="hl-edit__row" id="edit-trim">
+              <label>Start <input class="input hl-num" type="number" id="edit-start" min="0" step="0.1"></label>
+              <button type="button" class="hl-link" id="edit-start-now">Start where it's paused</button>
+              <label>End <input class="input hl-num" type="number" id="edit-end" min="0" step="0.1"></label>
+              <button type="button" class="hl-link" id="edit-end-now">End where it's paused</button>
+            </div>
+            <div class="hl-edit__row" id="edit-photo">
+              <label>Show for <input class="input hl-num" type="number" id="edit-seconds" min="1" max="20" step="0.5"> seconds</label>
+            </div>
+            <p class="field-label">Filter <span class="optional">(the guest picked one; change it or turn it off)</span></p>
+            <div class="filter-chips" id="edit-filters"></div>
+            <p class="hl-edit__loading" id="edit-loading" hidden></p>
+          </div>
+
+          <div class="hl-panel__head">
+            <h2 class="hl-panel__title">Running order</h2>
+            <button type="button" class="hl-link" id="clear-all" hidden>Remove all</button>
+          </div>
+          <ol class="hl-timeline" id="timeline"></ol>
+          <p class="hl-empty" id="timeline-empty">Nothing added yet. Use <b>+ Add</b> on the clips and photos you want, then drag them into order.</p>
+        </section>
+
+        <!-- How it looks, and making it -->
+        <aside class="hl-panel hl-settings">
+          <h2 class="hl-panel__title">Look &amp; sound</h2>
+          <fieldset class="hl-field">
+            <legend class="field-label">Shape</legend>
+            <label class="hl-radio"><input type="radio" name="shape" value="wide" checked> Wide (16:9, for TVs and computers)</label>
+            <label class="hl-radio"><input type="radio" name="shape" value="tall"> Tall (9:16, for phones)</label>
+          </fieldset>
+          <label class="field-label" for="title-1">Opening title</label>
+          <input class="input" id="title-1" maxlength="60" placeholder="Stephanie & Robert">
+          <input class="input hl-gap" id="title-2" maxlength="80" placeholder="A second line (optional)">
+          <label class="field-label" for="end-text">Closing words</label>
+          <input class="input" id="end-text" maxlength="80" placeholder="Thank you for celebrating with us">
+          <label class="hl-check"><input type="checkbox" id="credits"> Show who filmed each clip</label>
+          <label class="hl-check"><input type="checkbox" id="fades" checked> Fade between clips</label>
+          <label class="field-label" for="clip-volume">Sound from the clips</label>
+          <input type="range" id="clip-volume" min="0" max="1" step="0.05" value="1">
+          <label class="field-label" for="music">Music <span class="optional">(optional, from your computer)</span></label>
+          <input type="file" id="music" accept="audio/*">
+          <p class="hl-hint" id="music-name"></p>
+          <label class="field-label" for="music-volume">Music volume</label>
+          <input type="range" id="music-volume" min="0" max="1" step="0.05" value="0.6">
+
+          <div class="hl-make">
+            <button type="button" class="btn hl-make__btn" id="export" disabled>Make the video</button>
+            <p class="hl-hint" id="export-status">It plays through once while it records, so it takes as long as the video. Keep this tab open and in front until it's done.</p>
+            <div class="hl-result" id="result" hidden>
+              <video class="hl-result__video" id="result-video" controls playsinline></video>
+              <div class="hl-result__actions">
+                <a class="btn btn--ghost" id="download" download="highlight.mp4">Download</a>
+                <button type="button" class="btn" id="save-drive">Save &amp; get a link</button>
+              </div>
+              <p class="hl-hint" id="save-status"></p>
+            </div>
+            <div class="hl-saved" id="saved" hidden>
+              <p class="field-label">Link to send</p>
+              <div class="hl-saved__row">
+                <input class="input" id="saved-link" readonly>
+                <button type="button" class="btn btn--ghost" id="copy-link">Copy</button>
+              </div>
+              <p class="hl-hint">Anyone with this link can watch it, no sign-in needed. It's also on the Settings tab (Highlight Video), and the album page shows it once you publish the album.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <script src="../js/config.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/photo-tools.js"></script>
+  <script src="../js/highlight.js"></script>
+</body>
+</html>

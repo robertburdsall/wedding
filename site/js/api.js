@@ -106,5 +106,33 @@ window.WeddingAPI = (function () {
     }, 180000);
   }
 
-  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, getPhotos, uploadPhoto, ApiError };
+  // One step of a video upload: { step: 'start' | 'chunk' | 'finish', uploadId, ... }.
+  // Guests send their photo `code`; the highlight builder sends its review code as `k`.
+  async function videoStep(payload) {
+    return request(apiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'video', ...payload }),
+    }, 120000);
+  }
+
+  // The highlight builder: everything guests shared (needs the review code).
+  async function getReview(k) {
+    const url = new URL(apiUrl());
+    url.searchParams.set('action', 'review');
+    url.searchParams.set('k', k);
+    return request(url.toString(), { method: 'GET' });
+  }
+
+  // Part of one shared photo or video, base64 ({ size, offset, mime, data }).
+  async function getMedia(k, id, offset) {
+    const url = new URL(apiUrl());
+    url.searchParams.set('action', 'media');
+    url.searchParams.set('k', k);
+    url.searchParams.set('id', id);
+    url.searchParams.set('offset', String(offset || 0));
+    return request(url.toString(), { method: 'GET' }, 120000);
+  }
+
+  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, getPhotos, uploadPhoto, videoStep, getReview, getMedia, ApiError };
 })();
