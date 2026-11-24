@@ -153,16 +153,20 @@ Every *Wedding + Reception* household also gets a **Meal Link** (`yourdomain.com
 
 ## Photo sharing at the reception
 
-Reception guests take photos and record short videos with their own camera link (emailed to them) or by scanning the QR code on their table, with no app needed. They can add a filter (Warm, Film, B&W, Soft, Vivid, Cool, Vintage), but the file saved is always the original: only the filter's name is kept, and you can change or clear it later. **Nobody sees anyone else's photos until you publish the album.** Until then each guest only sees the photos they took themselves. You review everything on the Photos tab, hide what you don't want, and publish. Then everyone gets the album.
+Reception guests tap **Take photos & videos** on their camera link (emailed to them) or the QR code on their table. It opens a camera right on the page, like the iPhone's: **Photo** / **Video** under the picture (or swipe) switches between them, the last shot sits bottom left, and the switch-camera button bottom right. No app needed. Photos save as soon as they're taken; videos get a quick **Retake** / **Use this video** first. They can also pick photos they already took.
+
+Guests can add a filter: color looks (Warm, Film, B&W, Soft, Vivid, Cool, Vintage) or silly ones (Mustache, Sombrero, Top Hat, Puppy, Shades, Party Hat, Taco Rain, Hearts). The face ones follow faces live, for up to 4 people. **The file saved is always the original**, with no filter: only the filter's name is kept, plus, for the face filters, where the faces were (a few times a second for videos). The filter is drawn on top wherever it's shown, so you can change it or clear it later. **Nobody sees anyone else's photos until you publish the album.** Until then each guest only sees the photos they took themselves. You review everything on the Photos tab, hide what you don't want, and publish. Then everyone gets the album.
 
 **Where things go**
 
 - Photos are saved to a Google Drive folder, made automatically the first time you run **Set up sheets** (called *Stephanie & Robert — Wedding Photos*). After the wedding, right-click the folder → **Download** to keep them all.
 - Each photo and video gets a row on the **Photos** tab: when it was taken, who shared it (if they typed a name), their note, their table, a small preview, **Type** (Photo or Video), **Filter** and, for videos, **Seconds**.
 - **To leave one out of the album,** tick **Hidden** on its row. The file stays in your folder until you publish, when it moves to a separate private folder.
-- **To change a filter,** type a different one in the **Filter** column (Warm, Film, B&W, Soft, Vivid, Cool or Vintage), or clear it to show the original.
+- **To change a filter,** pick a different one in the **Filter** column's dropdown, or clear it to show the original. A different face filter is drawn on the same faces. Turning on a face filter for something that was taken without one only works in the highlight builder (the album doesn't know where the faces are).
+- The silly face filters use Google's free face detector, which phones download (about 9 MB, once) only when someone picks one. It works best on faces within a few steps of the camera.
+- The album download (the Drive folder) has the originals, without filters.
 - Phones shrink photos to 3000 pixels on the long side before uploading, which keeps uploads quick on venue signal and is still plenty for prints. This also strips location data.
-- **Videos are recorded right on the page** (tap **Record a video**), up to **Video Seconds** (30) each at 720p, about 10 MB. They go up in 2 MB pieces, so a weak signal only resends the piece that dropped. iPhones save MP4; some Android phones save WebM, which Google Drive plays in its own player. Each video also gets a still for the album grid, kept in a separate "(video stills)" folder so it isn't in the album download.
+- **Videos are recorded right on the page**, up to **Video Seconds** (30) each at 720p, about 10 MB. Photos taken on the page use the camera's full picture size where the phone allows. They go up in 2 MB pieces, so a weak signal only resends the piece that dropped. iPhones save MP4; some Android phones save WebM, which Google Drive plays in its own player. Each video also gets a still for the album grid, kept in a separate "(video stills)" folder so it isn't in the album download.
 - Videos from the camera roll can't be added (they're often huge and in 4K). Guests are told to record one on the page instead.
 
 **Who can see the photos**
@@ -218,7 +222,7 @@ Hid something else later? Tick it and publish again: it's taken out of the folde
 You put it together yourselves from the guests' clips and photos; nothing is made automatically.
 
 1. Open the **Highlight Builder Link** from the Settings tab, in **Chrome on a computer**. It lists every photo and video guests shared (tick **Show ones you hid** to include those too).
-2. Click **+ Add** on the ones you want. Select one in the **Running order** to trim it (type the start and end, or pause the video and use **Start/End where it's paused**), pick a different filter or **Original**, or for photos, how many seconds they show. Drag the rows (or use ↑ ↓) to put them in order.
+2. Click **+ Add** on the ones you want. Select one in the **Running order** to trim it (type the start and end, or pause the video and use **Start/End where it's paused**), pick a different filter (silly ones too: the builder finds the faces itself if it needs to) or **Original**, or for photos, how many seconds they show. Drag the rows (or use ↑ ↓) to put them in order.
 3. Under **Look & sound**: wide (16:9) or tall (9:16), an opening title, closing words, "Filmed by …" credits, fades, the clips' own sound, and an optional song from your computer (it gets quieter under clips with sound and fades out at the end).
 4. **Preview the highlight** plays it through. **Make the video** plays it once more while it records, so it takes as long as the video itself: keep the tab open and in front until it's done.
 5. Watch the result, then **Download** it, and/or **Save & get a link**. Saving puts it in your photo folder, fills in **Highlight Video** on Settings, and gives you a link anyone can watch without signing in. Once the album is published, the album page shows a **Watch the highlight video** button too.

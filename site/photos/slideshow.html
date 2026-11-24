@@ -23,6 +23,7 @@
     }
     .slide.is-on { opacity: 1; }
     .slide__bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(36px) brightness(0.45); }
+    .slide__fun { position: absolute; inset: 2vh 2vw; width: 96vw; height: 96vh; pointer-events: none; }
     .slide img { position: absolute; inset: 2vh 2vw; width: 96vw; height: 96vh; max-width: none; object-fit: contain; filter: drop-shadow(0 24px 50px rgba(0,0,0,0.55)); }
     .caption {
       position: fixed; left: 0; bottom: 0; right: 0; padding: 60px 4vw 3vh; pointer-events: none;
@@ -54,8 +55,8 @@
 </head>
 <body>
   <div class="show" id="show" aria-live="off">
-    <div class="slide" id="slide-a"><div class="slide__bg"></div><img alt=""></div>
-    <div class="slide" id="slide-b"><div class="slide__bg"></div><img alt=""></div>
+    <div class="slide" id="slide-a"><div class="slide__bg"></div><img alt=""><canvas class="slide__fun" aria-hidden="true"></canvas></div>
+    <div class="slide" id="slide-b"><div class="slide__bg"></div><img alt=""><canvas class="slide__fun" aria-hidden="true"></canvas></div>
   </div>
   <div class="caption" id="caption"><span class="caption__note" id="caption-note"></span><span class="caption__meta" id="caption-meta"></span></div>
 
@@ -80,6 +81,7 @@
   <script src="../js/api.js"></script>
   <script src="../js/qrcode.js"></script>
   <script src="../js/photo-tools.js"></script>
+  <script src="../js/fun.js"></script>
   <script src="../js/slideshow.js"></script>
 </body>
 </html>

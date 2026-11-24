@@ -253,7 +253,7 @@ describe('static site', () => {
   test('the public website files contain no date, time or year', () => {
     const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html', 'photos/highlight.html',
       'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js',
-      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js', 'js/recorder.js', 'js/highlight.js'];
+      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js', 'js/camera.js', 'js/fun.js', 'js/highlight.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i, f);
@@ -281,7 +281,7 @@ describe('static site', () => {
   test('the public site never contains guest or reception details', () => {
     const files = ['index.html', 'invite/index.html', 'meal/index.html', 'photos/index.html', 'photos/slideshow.html', 'photos/cards.html', 'photos/highlight.html',
       'js/main.js', 'js/invite.js', 'js/api.js', 'js/config.js', 'js/invitation-card.js', 'js/meal.js',
-      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js', 'js/recorder.js', 'js/highlight.js'];
+      'js/photos.js', 'js/photo-tools.js', 'js/slideshow.js', 'js/cards.js', 'js/camera.js', 'js/fun.js', 'js/highlight.js'];
     for (const f of files) {
       const text = readFileSync(site(f), 'utf8');
       assert.doesNotMatch(text, /Reception Venue|Reception Address|@gmail\.com/i, f);
@@ -346,6 +346,35 @@ describe('photo page helpers (js/photo-tools.js)', () => {
     assert.equal(loadTools().photoUrl('short', 600), '');
   });
 
+  function loadFun() {
+    const window = {};
+    const ctx = vm.createContext({ window, navigator: { userAgent: 'test' }, performance: { now: () => 0 } });
+    vm.runInContext(readFileSync(site('js/fun.js'), 'utf8'), ctx, { filename: 'fun.js' });
+    return window.Fun;
+  }
+
+  test('silly filters: which need faces, and faces between saved moments of a video', () => {
+    const Fun = loadFun();
+    assert.equal(Fun.needsFaces('Mustache'), true);
+    assert.equal(Fun.needsFaces('Taco Rain'), false);
+    assert.equal(Fun.isSilly('Taco Rain'), true);
+    assert.equal(Fun.isSilly('Warm'), false);
+    const track = { fps: 5, f: [[[100, 100, 200, 100, 150, 150, 150, 200]], [[200, 100, 300, 100, 250, 150, 250, 200]], []] };
+    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(track, 0.1))), [[150, 100, 250, 100, 200, 150, 200, 200]]); // halfway
+    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(track, 0))), track.f[0]);
+    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(track, 60))), []); // past the end: the last moment
+    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(null, 1))), []);
+    // The tracker fills gaps with the last faces it saw.
+    const tr = Fun.tracker();
+    tr.add(0, [[1, 2, 3, 4, 5, 6, 7, 8]]);
+    tr.add(0.6, []);
+    const done = JSON.parse(JSON.stringify(tr.done(1)));
+    assert.equal(done.fps, 5);
+    assert.equal(done.f.length, 6);
+    assert.deepEqual(done.f[1], [[1, 2, 3, 4, 5, 6, 7, 8]]);
+    assert.deepEqual(done.f[5], []);
+  });
+
   test('video links, filters and times', () => {
     const T = loadTools();
     assert.equal(T.videoUrl('1AbC_def-123456'), 'https://drive.google.com/uc?export=download&id=1AbC_def-123456');
@@ -353,8 +382,9 @@ describe('photo page helpers (js/photo-tools.js)', () => {
     assert.equal(T.videoUrl('"><script>'), '');
     // The filter names match the ones the Apps Script accepts.
     const gs = readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8');
-    const names = JSON.parse(gs.match(/var PHOTO_FILTERS = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
-    assert.deepEqual([...T.FILTER_NAMES], names);
+    const list = (name) => JSON.parse(gs.match(new RegExp(`var ${name} = (\\[[^\\]]*\\]);`))[1].replace(/'/g, '"'));
+    assert.deepEqual([...T.FILTER_NAMES], list('COLOR_FILTERS'));
+    assert.deepEqual([...loadFun().NAMES], list('SILLY_FILTERS'));
     assert.equal(T.filterCss(''), 'none');
     assert.equal(T.filterCss('nope'), 'none');
     assert.match(T.filterCss('B&W'), /grayscale\(1\)/);

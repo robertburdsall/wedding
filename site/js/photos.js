@@ -1,8 +1,9 @@
 // The reception camera and, once it's published, the photo album. Guests open their emailed
-// camera link (or scan the QR code on their table), add photos from their phone and record
-// short videos right on the page (js/recorder.js), with an optional filter. Everything is saved
-// to Google Drive through the Apps Script (apps-script/Code.gs) and listed on the "Photos" tab
-// of the Sheet; filters are saved by name, and the files stay the unfiltered originals.
+// camera link (or scan the QR code on their table) and take photos and videos right on the page
+// (js/camera.js), or add photos from their phone, with an optional filter (including the silly
+// ones in js/fun.js). Everything is saved to Google Drive through the Apps Script
+// (apps-script/Code.gs) and listed on the "Photos" tab of the Sheet; filters are saved by name
+// (plus where the faces are, for the silly ones), and the files stay the unfiltered originals.
 // Until the couple publishes the album, each guest only sees their own photos and videos.
 (function () {
   'use strict';
@@ -177,7 +178,10 @@
     if (!v.limit) return Infinity;
     return Math.max(0, v.left - queuedOf('video'));
   }
-  const canRecord = !!(window.VideoRecorder && window.VideoRecorder.supported());
+  const Cam = window.Camera;
+  const Fun = window.Fun;
+  const canCamera = !!(Cam && Cam.supported());
+  const canRecord = !!(Cam && Cam.canVideo());
 
   function renderAllowance() {
     const you = data.you || {};
@@ -186,9 +190,10 @@
     const open = !(data.uploads && data.uploads.open === false);
     const pLeft = photosLeft();
     const vLeft = canRecord ? videosLeft() : 0;
-    $('#camera-button').hidden = !touch || pLeft <= 0;
+    $('#camera-open').hidden = !canCamera || (pLeft <= 0 && vLeft <= 0);
+    $('#camera-open-label').textContent = canRecord ? (pLeft > 0 ? (vLeft > 0 ? 'Take photos & videos' : 'Take photos') : 'Record videos') : 'Take photos';
+    $('#camera-button').hidden = canCamera || !touch || pLeft <= 0;
     $('#choose-button').hidden = pLeft <= 0;
-    $('#video-button').hidden = vLeft <= 0;
     const nothingLeft = pLeft <= 0 && vLeft <= 0;
     $('.photos-actions').hidden = nothingLeft;
     $('#photos-hint').hidden = nothingLeft;
@@ -233,9 +238,11 @@
       const img = h('img', { src: imageFor(photo, 600), alt: photo.caption || (photo.from ? `${what} by ${photo.from}` : `Wedding ${what.toLowerCase()}`), loading: 'lazy', decoding: 'async' });
       img.style.filter = T.filterCss(photo.filter);
       retryingImage(img, photo, 600);
+      const fun = funFor(photo) ? h('canvas', { class: 'tile__fun', 'aria-hidden': 'true' }) : null;
+      if (fun) img.addEventListener('load', () => drawFunOver(fun, img, photo, 1.3, 'cover'));
       const badge = isVideo(photo) ? h('span', { class: 'tile__badge', 'aria-hidden': 'true' },
         h('span', { class: 'tile__play' }), photo.seconds ? T.formatSeconds(photo.seconds) : '') : null;
-      grid.append(h('button', { type: 'button', class: `tile${isVideo(photo) ? ' tile--video' : ''}`, 'data-id': photo.id, onclick: () => openLightbox(i) }, img, badge));
+      grid.append(h('button', { type: 'button', class: `tile${isVideo(photo) ? ' tile--video' : ''}`, 'data-id': photo.id, onclick: () => openLightbox(i) }, img, fun, badge));
     });
     const published = !!(data && data.album && data.album.published);
     const nVideos = photos.filter(isVideo).length;
@@ -247,6 +254,37 @@
     $('#timeline-empty').hidden = photos.length > 0;
     $('#timeline-note').hidden = published || !photos.length;
     $('.timeline__bar').hidden = photos.length < 2;
+  }
+
+  /* ---------- silly filters (js/fun.js) ---------- */
+
+  // Whether a photo or video has a silly filter we can draw (face filters need the face positions
+  // saved when it was taken; tacos and hearts don't).
+  function funFor(p) {
+    if (!Fun || !Fun.isSilly(p.filter)) return false;
+    if (!Fun.needsFaces(p.filter)) return true;
+    return !!((p.faces && p.faces.length) || (p.track && p.track.f && p.track.f.length));
+  }
+  function facesFor(p, t) {
+    if (isVideo(p)) return Fun.facesAt(p.track, t);
+    return p.faces || [];
+  }
+
+  // Draws the silly filter in a canvas laid over `media` (an <img> or <video>), matching how the
+  // picture fits its box ('cover' for the grid, 'contain' in the full-screen view).
+  function drawFunOver(canvas, media, p, t, fit) {
+    const w = canvas.clientWidth, hgt = canvas.clientHeight;
+    if (!w || !hgt) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(hgt * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const mw = media.videoWidth || media.naturalWidth || p.w || w;
+    const mh = media.videoHeight || media.naturalHeight || p.h || hgt;
+    const s = fit === 'cover' ? Math.max(w / mw, hgt / mh) : Math.min(w / mw, hgt / mh);
+    const box = { x: (w - mw * s) / 2, y: (hgt - mh * s) / 2, w: mw * s, h: mh * s };
+    Fun.draw(ctx, p.filter, facesFor(p, t), box, t);
   }
 
   document.querySelectorAll('[data-sort]').forEach((btn) => {
@@ -316,23 +354,62 @@
   // (the `capture` attribute). Computers just get the file chooser, which is all `capture`
   // would give them anyway.
   const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  if (touch) {
-    $('#camera-button').hidden = false;
+  if (touch || canCamera) {
     $('#choose-button').classList.add('btn--ghost');
     $('#choose-label').textContent = 'Choose photos';
-    $('#photos-hint').textContent = canRecord
-      ? 'No app needed. Take photos or short videos, or pick photos from your camera roll.'
-      : 'No app needed. Take one now, or pick some from your camera roll.';
   }
+  $('#photos-hint').textContent = canCamera
+    ? `No app needed. Take photos${canRecord ? ' and short videos' : ''} right here, with fun filters if you like, or pick photos you already took.`
+    : 'No app needed. Take one now, or pick some from your camera roll.';
 
-  $('#video-button').addEventListener('click', () => {
-    if (videosLeft() <= 0) { renderAllowance(); return; }
-    window.VideoRecorder.open({
-      maxSeconds: videoInfo().seconds || 30,
-      filter: store.get('wedding.photoFilter'),
-      onDone: (clip) => { picked = []; pickedVideo = clip; openSheet(''); },
-    });
+  // The camera: everything taken goes straight into the upload queue below.
+  $('#camera-open').addEventListener('click', () => {
+    const named = (data.you && data.you.name) || store.get('wedding.photoFrom') || store.get('wedding.photoNameAsked');
+    if (named) openCamera();
+    else {
+      $('#name-input').value = '';
+      $('#name-sheet').hidden = false;
+      $('#name-input').focus();
+    }
   });
+  $('#name-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('#name-input').value.trim().slice(0, 60);
+    if (name) store.set('wedding.photoFrom', name);
+    store.set('wedding.photoNameAsked', '1');
+    $('#name-sheet').hidden = true;
+    openCamera();
+  });
+  $('#name-skip').addEventListener('click', () => {
+    store.set('wedding.photoNameAsked', '1');
+    $('#name-sheet').hidden = true;
+    openCamera();
+  });
+
+  function openCamera() {
+    Cam.open({
+      filter: store.get('wedding.photoFilter'),
+      mode: store.get('wedding.cameraMode') === 'video' && videosLeft() > 0 ? 'video' : photosLeft() > 0 ? 'photo' : 'video',
+      maxSeconds: videoInfo().seconds || 30,
+      left: () => ({ photo: photosLeft(), video: canRecord ? videosLeft() : 0 }),
+      onCapture: (shot) => {
+        const from = store.get('wedding.photoFrom') || '';
+        store.set('wedding.photoFilter', shot.filter || '');
+        store.set('wedding.cameraMode', shot.kind);
+        if (shot.kind === 'photo') {
+          const prepared = { blob: shot.blob, width: shot.width, height: shot.height, takenAt: shot.takenAt, previewUrl: URL.createObjectURL(shot.blob) };
+          addUpload({ kind: 'photo', file: shot.blob, prepared, faces: shot.faces }, from, '', shot.filter);
+        } else {
+          addUpload({ kind: 'video', video: shot }, from, '', shot.filter);
+        }
+        renderAllowance();
+        pump();
+      },
+      onClose: (n) => {
+        if (n) $('#upload-queue').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      },
+    });
+  }
 
   $('#camera-input').addEventListener('change', onPicked);
   $('#photo-input').addEventListener('change', onPicked);
@@ -343,7 +420,7 @@
     const images = files.filter((f) => !f.type || f.type.startsWith('image/'));
     const skipped = files.length - images.length;
     if (!images.length) {
-      if (skipped) alert(canRecord ? 'Videos from your camera roll can\'t be shared here. Tap "Record a video" to record one on this page instead.' : 'Only photos can be shared here.');
+      if (skipped) alert(canRecord ? 'Videos from your camera roll can\'t be shared here. Tap "Take photos & videos" to record one on this page instead.' : 'Only photos can be shared here.');
       return;
     }
     const left = photosLeft();
@@ -352,7 +429,7 @@
     picked = images.slice(0, most);
     pickedVideo = null;
     let note = '';
-    if (skipped) note = `${plural(skipped, 'video')} left out: tap "Record a video" to record one here instead.`;
+    if (skipped) note = `${plural(skipped, 'video')} left out: tap "Take photos & videos" to record one here instead.`;
     if (images.length > most) {
       note = most === left
         ? `You have ${plural(left, 'photo')} left, so we'll share the first ${left}.`
@@ -503,6 +580,14 @@
     try {
       prepared = item.prepared || await T.preparePhoto(item.file);
       item.prepared = prepared;
+      // A photo from the camera roll with a face filter: find the faces now.
+      if (!item.faces && Fun && Fun.needsFaces(item.filter)) {
+        try {
+          const bitmap = await createImageBitmap(prepared.blob);
+          item.faces = await Fun.detectImage(bitmap);
+          bitmap.close();
+        } catch (err) { item.faces = []; }
+      }
     } catch (err) {
       return fail(item, "This photo couldn't be opened on this phone. Try a different one.", false);
     }
@@ -514,6 +599,7 @@
       code, data: base64, from: item.from, caption: item.caption, table,
       takenAt: prepared.takenAt ? prepared.takenAt.toISOString() : '',
       width: prepared.width, height: prepared.height, uploadId: item.id, me, device, filter: item.filter,
+      faces: Fun && Fun.needsFaces(item.filter) ? item.faces || [] : undefined,
     };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -522,7 +608,7 @@
         if (res && res.you) data.you = res.you;
         update(item);
         renderAllowance();
-        if (res && res.photo && res.photo.id) addToTimeline(res.photo, prepared.previewUrl);
+        if (res && res.photo && res.photo.id) addToTimeline({ ...res.photo, faces: res.photo.faces || item.faces }, prepared.previewUrl);
         item.prepared = null; // let the phone free the memory
         return;
       } catch (err) {
@@ -546,6 +632,7 @@
     const meta = {
       ...base, mime: v.mime, size: v.blob.size, seconds: v.seconds, width: v.width, height: v.height, filter: item.filter,
       takenAt: v.takenAt ? v.takenAt.toISOString() : '', from: item.from, caption: item.caption, table, me, device,
+      track: Fun && Fun.needsFaces(item.filter) && v.track ? v.track : undefined,
     };
     // Retries one step a few times when the connection hiccups.
     async function step(payload) {
@@ -583,7 +670,7 @@
         if (r.photo && r.photo.id) {
           const posterUrl = v.poster ? URL.createObjectURL(v.poster) : '';
           localVideo.set(r.photo.id, URL.createObjectURL(v.blob));
-          addToTimeline(r.photo, posterUrl);
+          addToTimeline({ ...r.photo, track: r.photo.track || v.track }, posterUrl);
         }
         item.video = { ...v, blob: null, poster: null }; // let the phone free the memory
         return;
@@ -629,12 +716,23 @@
   const lightboxVideo = $('#lightbox-video');
   let current = 0;
 
+  let videoFunRaf = 0;
   function clearVideo() {
+    cancelAnimationFrame(videoFunRaf);
     const v = lightboxVideo.querySelector('video');
     if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
     lightboxVideo.textContent = '';
     lightboxVideo.hidden = true;
   }
+
+  // The silly filter over the full-screen photo.
+  const lightboxFun = $('#lightbox-fun');
+  function photoFun(p) {
+    lightboxFun.hidden = !funFor(p);
+    if (!lightboxFun.hidden && lightboxImg.complete && lightboxImg.naturalWidth) drawFunOver(lightboxFun, lightboxImg, p, 1.3, 'contain');
+  }
+  lightboxImg.addEventListener('load', () => { const p = shown[current]; if (p && !isVideo(p)) photoFun(p); });
+  window.addEventListener('resize', () => { const p = shown[current]; if (!lightbox.hidden && p && !isVideo(p)) photoFun(p); });
 
   // Plays a video in the lightbox, with its filter. If the browser can't play Drive's file
   // directly (still processing, or a WebM on an iPhone), Google Drive's own player takes over.
@@ -651,7 +749,19 @@
       lightboxVideo.append(h('iframe', { src: `https://drive.google.com/file/d/${encodeURIComponent(p.id)}/preview`, allow: 'autoplay; fullscreen', title: 'Video', class: 'photo-lightbox__frame' }));
     }, { once: true });
     v.src = mine || T.videoUrl(p.id);
-    lightboxVideo.append(v);
+    if (funFor(p)) {
+      // Draw the silly filter over the video as it plays, following the faces.
+      const c = h('canvas', { class: 'fun-wrap__canvas', 'aria-hidden': 'true' });
+      lightboxVideo.append(h('div', { class: 'fun-wrap' }, v, c));
+      const frame = () => {
+        if (!v.isConnected) return;
+        drawFunOver(c, v, p, v.currentTime, 'contain');
+        videoFunRaf = requestAnimationFrame(frame);
+      };
+      videoFunRaf = requestAnimationFrame(frame);
+    } else {
+      lightboxVideo.append(v);
+    }
     lightboxVideo.hidden = false;
   }
 
@@ -661,11 +771,15 @@
     const p = shown[current];
     const what = isVideo(p) ? 'Video' : 'Photo';
     if (isVideo(p)) {
+      lightboxFun.hidden = true;
+      $('#lightbox-photo').hidden = true;
       showVideo(p);
     } else {
       clearVideo();
+      $('#lightbox-photo').hidden = false;
       lightboxImg.hidden = false;
       lightboxImg.style.filter = T.filterCss(p.filter);
+      photoFun(p);
     }
     // Show the small version (already loaded) at once, then swap in the full-size one.
     if (!isVideo(p)) {

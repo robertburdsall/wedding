@@ -156,20 +156,30 @@
   const FILTER_NAMES = Object.keys(FILTERS);
   const filterCss = (name) => FILTERS[name] || 'none';
 
-  // A row of filter buttons ("Original", "Warm", ...). Calls onChange(name) ('' = none).
-  function filterChips(container, current, onChange) {
+  // A row of filter buttons ("Original", "Warm", ..., then the silly ones from js/fun.js when
+  // that's on the page). Calls onChange(name) ('' = none).
+  function filterChips(container, current, onChange, { silly = true } = {}) {
     container.textContent = '';
     container.setAttribute('role', 'radiogroup');
-    const names = [''].concat(FILTER_NAMES);
+    const fun = silly && root.Fun ? root.Fun.NAMES : [];
+    const names = [''].concat(FILTER_NAMES, fun);
     const buttons = names.map((name) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'filter-chip';
       b.setAttribute('role', 'radio');
       b.dataset.filter = name;
-      const swatch = document.createElement('span');
+      let swatch;
+      if (fun.includes(name)) {
+        swatch = document.createElement('canvas');
+        swatch.width = swatch.height = 96;
+        root.Fun.drawChip(swatch, name);
+        b.classList.add('filter-chip--fun');
+      } else {
+        swatch = document.createElement('span');
+        swatch.style.filter = filterCss(name);
+      }
       swatch.className = 'filter-chip__swatch';
-      swatch.style.filter = filterCss(name);
       const label = document.createElement('span');
       label.textContent = name || 'Original';
       b.append(swatch, label);
@@ -179,6 +189,11 @@
     });
     function set(name) {
       buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.filter === name)));
+      // Keep the picked one in view (without scrolling the page).
+      const on = buttons.find((b) => b.dataset.filter === name);
+      if (on && container.scrollWidth > container.clientWidth) {
+        requestAnimationFrame(() => { container.scrollLeft = Math.max(0, on.offsetLeft - container.clientWidth / 2 + on.offsetWidth / 2); });
+      }
     }
     set(current || '');
     return { set };

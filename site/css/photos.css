@@ -172,48 +172,67 @@ body.no-scroll { overflow: hidden; }
 .share-sheet__previews--video { justify-content: center; }
 .share-sheet__video { width: auto; max-width: 100%; max-height: 38vh; border-radius: 10px; background: #000; }
 
-/* ---------- Video camera (js/recorder.js) ---------- */
-.recorder { position: fixed; inset: 0; z-index: 120; background: #000; color: #fff; overflow: hidden; }
-.recorder[hidden] { display: none; }
-.recorder__view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
-.recorder__view.is-mirrored { transform: scaleX(-1); }
-#rec-replay { object-fit: contain; }
-.recorder__message {
-  position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); width: min(86vw, 420px); margin: 0;
+/* ---------- Silly filters drawn over photos and videos (js/fun.js) ---------- */
+.tile__fun { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.fun-wrap { position: relative; display: inline-block; line-height: 0; max-width: 100%; }
+.fun-wrap__canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.filter-chip--fun .filter-chip__swatch { background: none; }
+
+/* ---------- The camera (js/camera.js) ---------- */
+.camera { position: fixed; inset: 0; z-index: 120; background: #000; color: #fff; overflow: hidden; display: flex; flex-direction: column; }
+.camera[hidden] { display: none; }
+.camera__stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; }
+.camera__view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.camera__view--replay { object-fit: contain; }
+.camera__fun { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.camera.is-front:not(.is-reviewing) #cam-live,
+.camera.is-front:not(.is-reviewing) .camera__fun { transform: scaleX(-1); }
+.camera__flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.camera__flash.is-on { animation: camera-flash 0.35s ease-out; }
+@keyframes camera-flash { from { opacity: 0.85; } to { opacity: 0; } }
+.camera__message {
+  position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(86vw, 420px); margin: 0;
   padding: 14px 18px; border-radius: 14px; background: rgba(0, 0, 0, 0.6); text-align: center; line-height: 1.45;
 }
-.recorder__top {
+.camera__top {
   position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
-  padding: calc(10px + env(safe-area-inset-top)) 12px 10px; background: linear-gradient(rgba(0, 0, 0, 0.45), transparent);
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px; background: linear-gradient(rgba(0, 0, 0, 0.45), transparent); z-index: 2;
 }
-.recorder__icon {
+.camera__spacer { width: 44px; }
+.camera__icon {
   display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%;
-  background: rgba(0, 0, 0, 0.35); color: #fff; font-size: 1.9rem; line-height: 1; cursor: pointer;
+  background: rgba(255, 255, 255, 0.14); color: #fff; font-size: 1.9rem; line-height: 1; cursor: pointer;
 }
-.recorder__icon:disabled { opacity: 0.4; }
-.recorder__timer { font-size: 0.95rem; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); }
-.recorder.is-recording .recorder__timer { background: #c0392b; }
-.recorder__bottom {
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 12px calc(18px + env(safe-area-inset-bottom));
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6) 35%);
-}
-.recorder.is-recording .filter-chips { visibility: hidden; }
+.camera__status { font-size: 0.9rem; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); }
+.camera__status:empty { visibility: hidden; }
+.camera.is-recording .camera__status { background: #c0392b; }
+.camera__bottom { flex: none; background: #000; padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); }
+.camera.is-recording .filter-chips, .camera.is-recording .camera__modes { visibility: hidden; }
 .filter-chips--dark .filter-chip { color: rgba(255, 255, 255, 0.8); }
 .filter-chips--dark .filter-chip[aria-checked="true"] { color: #fff; }
-.filter-chips--dark .filter-chip[aria-checked="true"] .filter-chip__swatch { border-color: #fff; }
-.filter-chips--dark { justify-content: safe center; }
-.recorder__controls { display: flex; justify-content: center; padding-top: 6px; }
-.recorder__shutter {
-  position: relative; width: 78px; height: 78px; border: 0; padding: 0; border-radius: 50%; background: none; cursor: pointer;
+.filter-chips--dark .filter-chip[aria-checked="true"] .filter-chip__swatch { border-color: #f7d77a; }
+.camera__modes { display: flex; justify-content: center; gap: 22px; margin: 4px 0 10px; }
+.camera__modes button {
+  border: 0; background: none; color: rgba(255, 255, 255, 0.7); cursor: pointer; padding: 4px 2px;
+  font-size: 0.82rem; letter-spacing: 0.16em; text-transform: uppercase;
 }
-.recorder__shutter:disabled { opacity: 0.4; cursor: default; }
-.recorder__ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
-.recorder__ring circle { fill: none; stroke: #fff; stroke-width: 5; stroke-dasharray: 1; stroke-dashoffset: 0; }
-.recorder.is-recording .recorder__ring circle { stroke: #e74c3c; stroke-dashoffset: calc(1 - var(--done, 0)); stroke-dasharray: 1 1; }
-.recorder__dot {
-  position: absolute; inset: 12px; border-radius: 50%; background: #e74c3c; transition: inset 0.2s, border-radius 0.2s;
-}
-.recorder.is-recording .recorder__dot { inset: 26px; border-radius: 6px; }
-.recorder__review { display: flex; gap: 10px; justify-content: center; padding-top: 6px; }
-.recorder__btn { flex: 1; max-width: 220px; padding-inline: 0.8em; white-space: nowrap; letter-spacing: 0.12em; background: #fff; color: var(--color-dark); border-color: #fff; }
-.recorder__btn--ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.8); }
+.camera__modes button[aria-pressed="true"] { color: #f7d77a; font-weight: 500; }
+.camera__controls { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.camera__last { justify-self: start; position: relative; width: 52px; height: 52px; padding: 0; border: 2px solid #fff; border-radius: 10px; overflow: hidden; background: #222; cursor: pointer; }
+.camera__last canvas { width: 100%; height: 100%; display: block; }
+.camera__count { position: absolute; right: 2px; bottom: 2px; min-width: 18px; padding: 0 5px; border-radius: 999px; background: #f7d77a; color: #000; font-size: 0.7rem; line-height: 18px; font-weight: 600; }
+.camera__count:empty { display: none; }
+.camera__flip { justify-self: end; }
+.camera__shutter { grid-column: 2; position: relative; width: 78px; height: 78px; border: 0; padding: 0; border-radius: 50%; background: none; cursor: pointer; }
+.camera__shutter:disabled { opacity: 0.4; cursor: default; }
+.camera__ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.camera__ring circle { fill: none; stroke: #fff; stroke-width: 5; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.camera.is-recording .camera__ring circle { stroke: #e74c3c; stroke-dasharray: 1 1; stroke-dashoffset: calc(1 - var(--done, 0)); }
+.camera__dot { position: absolute; inset: 9px; border-radius: 50%; background: #fff; transition: inset 0.2s, border-radius 0.2s, background 0.2s; }
+.camera__shutter:active .camera__dot { inset: 12px; }
+.camera[data-mode="video"] .camera__dot { inset: 12px; background: #e74c3c; }
+.camera.is-recording .camera__dot { inset: 26px; border-radius: 6px; }
+.camera__review { display: flex; gap: 10px; justify-content: center; padding-top: 6px; }
+.camera__btn { flex: 1; max-width: 220px; padding-inline: 0.8em; white-space: nowrap; letter-spacing: 0.12em; background: #fff; color: var(--color-dark); border-color: #fff; }
+.camera__btn--ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.8); }
+.share-sheet__intro { margin: -6px 0 6px; text-align: center; color: var(--color-text-muted); }

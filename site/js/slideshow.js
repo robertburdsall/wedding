@@ -73,6 +73,18 @@
     }
   }
 
+  // Silly filters (js/fun.js), drawn over the photo where it sits in the slide.
+  function drawFun(canvas, p) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.clearRect(0, 0, w, h);
+    if (!window.Fun || !Fun.isSilly(p.filter) || !p.w || !p.h) return;
+    const s = Math.min(w / p.w, h / p.h);
+    Fun.draw(ctx, p.filter, p.faces || [], { x: (w - p.w * s) / 2, y: (h - p.h * s) / 2, w: p.w * s, h: p.h * s }, 1.3);
+  }
+
   function pick() {
     if (fresh.length) return fresh.shift();
     if (!deck.length) {
@@ -102,6 +114,7 @@
     const back = slides[1 - front];
     back.querySelector('img').src = url;
     back.querySelector('img').style.filter = T.filterCss(p.filter);
+    drawFun(back.querySelector('canvas'), p);
     back.querySelector('.slide__bg').style.backgroundImage = `url("${url}")`;
     back.classList.add('is-on');
     slides[front].classList.remove('is-on');

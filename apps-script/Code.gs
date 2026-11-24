@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '3.0.1';
+var VERSION = '3.1.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -99,7 +99,8 @@ var PHOTO_COL = {
   kind: 'Type',
   filter: 'Filter',
   seconds: 'Seconds',
-  posterId: 'Still File ID'
+  posterId: 'Still File ID',
+  faces: 'Faces'
 };
 var PHOTO_HEADERS = Object.keys(PHOTO_COL).map(function (k) { return PHOTO_COL[k]; });
 var PHOTO_HEADER_NOTES = {
@@ -112,11 +113,16 @@ var PHOTO_HEADER_NOTES = {
   'Type': 'Photo or Video.',
   'Filter': 'The filter the guest picked. The file in Drive is always the original, unfiltered. Pick a different one, or clear it to show the photo or video without a filter.',
   'Seconds': 'How long the video is.',
-  'Still File ID': 'For videos: a still from the start of the video, shown in the album grid.'
+  'Still File ID': 'For videos: a still from the start of the video, shown in the album grid.',
+  'Faces': 'Where the faces are (saved when a silly face filter was used), so the mustache or hat can be drawn on the original. Filled in automatically.'
 };
-// Filters guests can pick (the looks are in site/js/photo-tools.js). Only the name is saved:
-// the photo or video itself is always kept unfiltered.
-var PHOTO_FILTERS = ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage'];
+// Filters guests can pick: color looks (site/js/photo-tools.js) and silly ones (site/js/fun.js).
+// Only the name is saved (plus where the faces are, for the silly ones): the photo or video
+// itself is always kept unfiltered.
+var COLOR_FILTERS = ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage'];
+var SILLY_FILTERS = ['Mustache', 'Sombrero', 'Top Hat', 'Puppy', 'Shades', 'Party Hat', 'Taco Rain', 'Hearts'];
+var PHOTO_FILTERS = COLOR_FILTERS.concat(SILLY_FILTERS);
+var FACES_MAX_LENGTH = 45000; // a Sheets cell holds 50,000 characters
 // Videos are recorded on the camera page and sent to Drive in pieces.
 var VIDEO_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 var VIDEO_CHUNK = 2 * 1024 * 1024; // each piece; Drive needs multiples of 256 KB
@@ -1048,7 +1054,8 @@ function readPhotos_(c) {
       kind: /video/i.test(String(get(row, 'kind'))) ? 'video' : 'photo',
       filter: cleanFilter_(get(row, 'filter')),
       seconds: Number(get(row, 'seconds')) || 0,
-      posterId: String(get(row, 'posterId')).trim()
+      posterId: String(get(row, 'posterId')).trim(),
+      facesRaw: String(get(row, 'faces')).trim()
     };
   });
 }
@@ -1057,14 +1064,62 @@ function isoTime_(v) {
   return v instanceof Date && !isNaN(v.getTime()) ? v.toISOString() : '';
 }
 
-function publicPhoto_(p) {
+function publicPhoto_(p, withFaces) {
   var taken = isoTime_(p.takenAt) || isoTime_(p.uploadedAt);
   var out = { id: p.id, w: p.width, h: p.height, takenAt: taken, uploadedAt: isoTime_(p.uploadedAt) || taken, from: p.from, caption: p.caption, table: p.table, kind: p.kind || 'photo', filter: p.filter || '' };
   if (out.kind === 'video') {
     out.seconds = p.seconds || 0;
     out.poster = DRIVE_ID_.test(p.posterId || '') ? p.posterId : '';
   }
+  // Face positions go along only when they're needed to draw a silly filter (or to the builder).
+  if (p.facesRaw && (withFaces || SILLY_FILTERS.indexOf(out.filter) >= 0)) {
+    var faces = parseFaces_(p.facesRaw, out.kind);
+    if (faces) out[out.kind === 'video' ? 'track' : 'faces'] = faces;
+  }
   return out;
+}
+
+// [[8 numbers], ...]: up to 4 faces, each the right eye, left eye, nose and mouth (x, y) in
+// thousandths of the picture's width and height. null if it isn't that.
+function cleanFaceList_(v) {
+  if (!Array.isArray(v)) return null;
+  var out = [];
+  for (var i = 0; i < v.length && out.length < 4; i++) {
+    var f = v[i];
+    if (!Array.isArray(f) || f.length !== 8) return null;
+    for (var j = 0; j < 8; j++) {
+      if (typeof f[j] !== 'number' || !isFinite(f[j]) || f[j] < -500 || f[j] > 1500) return null;
+    }
+    out.push(f.map(function (n) { return Math.round(n); }));
+  }
+  return out;
+}
+
+// { fps, f: [faces per frame] } for a video. Thinned out if it's too long for one cell.
+function cleanTrack_(v) {
+  if (!v || typeof v !== 'object' || !Array.isArray(v.f)) return null;
+  var fps = Math.round(Number(v.fps));
+  if (!(fps >= 1 && fps <= 10) || v.f.length > fps * 130) return null;
+  var frames = [];
+  for (var i = 0; i < v.f.length; i++) {
+    var f = cleanFaceList_(v.f[i]);
+    if (!f) return null;
+    frames.push(f);
+  }
+  var track = { fps: fps, f: frames };
+  while (JSON.stringify(track).length > FACES_MAX_LENGTH && track.fps > 1) {
+    track = { fps: track.fps / 2, f: track.f.filter(function (x, k) { return k % 2 === 0; }) };
+  }
+  return JSON.stringify(track).length > FACES_MAX_LENGTH ? null : track;
+}
+
+function parseFaces_(raw, kind) {
+  try {
+    var v = JSON.parse(raw);
+    return kind === 'video' ? cleanTrack_(v) : cleanFaceList_(v);
+  } catch (err) {
+    return null;
+  }
 }
 
 var DRIVE_ID_ = /^[A-Za-z0-9_-]{10,200}$/;
@@ -1083,7 +1138,7 @@ function photosPayload_(c, settings, now, params) {
       if (!DRIVE_ID_.test(p.id) || p.hidden) return false;
       return published || (uploader !== '' && p.uploader === uploader);
     })
-    .map(publicPhoto_)
+    .map(function (p) { return publicPhoto_(p); })
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : (a.uploadedAt < b.uploadedAt ? -1 : 1); });
   var you = photoAllowance_(all, uploader, settings);
   you.name = person ? person.name : '';
@@ -1179,6 +1234,8 @@ function submitPhoto_(c, body, now) {
   var width = photoDimension_(body.width);
   var height = photoDimension_(body.height);
   var filter = cleanFilter_(body.filter);
+  var faces = body.faces === undefined ? null : cleanFaceList_(body.faces);
+  var facesRaw = faces && faces.length ? JSON.stringify(faces) : '';
 
   var folderId = withLock_(function () { return photoFolderId_(c, settings); });
   var fileName = Utilities.formatDate(takenAt, Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm.ss') +
@@ -1209,12 +1266,12 @@ function submitPhoto_(c, body, now) {
     appendPhotoRow_(c, {
       uploadedAt: now, takenAt: takenAt, from: safeText_(from), caption: safeText_(caption), table: safeText_(table),
       hidden: false, preview: previewFormula_(id), link: file.getUrl(), fileId: id, width: width, height: height,
-      uploadId: uploadId, uploader: uploader, kind: 'Photo', filter: filter
+      uploadId: uploadId, uploader: uploader, kind: 'Photo', filter: filter, faces: facesRaw
     });
     var you = allowance();
     you.name = person ? person.name : '';
     return {
-      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0, filter: filter }),
+      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0, filter: filter, facesRaw: facesRaw }),
       duplicate: false,
       you: you
     };
@@ -1505,6 +1562,8 @@ function startVideo_(c, settings, body, uploadId, highlight, now) {
       width: photoDimension_(body.width), height: photoDimension_(body.height), seconds: seconds > 0 ? seconds : '',
       filter: cleanFilter_(body.filter), uploader: uploader, personName: person ? person.name : ''
     };
+    var track = body.track === undefined ? null : cleanTrack_(body.track);
+    u.meta.facesRaw = track && track.f.some(function (f) { return f.length; }) ? JSON.stringify(track) : '';
     name = Utilities.formatDate(takenAt, tz, 'yyyy-MM-dd HH.mm.ss') + (from ? ' ' + from.replace(/[\\\/:*?"<>|]/g, '') : '') + '.' + VIDEO_TYPES[mime];
     description = u.meta.caption;
   }
@@ -1582,7 +1641,7 @@ function finishVideo_(c, settings, u, body, now) {
       uploadedAt: now, takenAt: takenAt, from: safeText_(m.from), caption: safeText_(m.caption), table: safeText_(m.table),
       hidden: false, preview: previewFormula_(posterId || u.fileId), link: file.getUrl(), fileId: u.fileId,
       width: m.width, height: m.height, uploadId: u.uploadId, uploader: m.uploader,
-      kind: 'Video', filter: m.filter, seconds: m.seconds, posterId: posterId
+      kind: 'Video', filter: m.filter, seconds: m.seconds, posterId: posterId, faces: m.facesRaw || ''
     });
     CacheService.getScriptCache().remove(uploadCacheKey_(u.uploadId));
     var you = photoAllowance_(readPhotos_(c), m.uploader, settings);
@@ -1590,7 +1649,8 @@ function finishVideo_(c, settings, u, body, now) {
     return {
       photo: publicPhoto_({
         id: u.fileId, uploadedAt: now, takenAt: takenAt, from: m.from, caption: m.caption, table: m.table,
-        width: Number(m.width) || 0, height: Number(m.height) || 0, kind: 'video', filter: m.filter, seconds: Number(m.seconds) || 0, posterId: posterId
+        width: Number(m.width) || 0, height: Number(m.height) || 0, kind: 'video', filter: m.filter, seconds: Number(m.seconds) || 0, posterId: posterId,
+        facesRaw: m.facesRaw || ''
       }),
       duplicate: false,
       you: you
@@ -1617,12 +1677,12 @@ function reviewPayload_(c, settings) {
   var items = readPhotos_(c)
     .filter(function (p) { return DRIVE_ID_.test(p.id); })
     .map(function (p) {
-      var o = publicPhoto_(p);
+      var o = publicPhoto_(p, true);
       o.hidden = p.hidden;
       return o;
     })
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : 0; });
-  return { items: items, filters: PHOTO_FILTERS, highlight: setting_(settings, 'Highlight Video') };
+  return { items: items, filters: PHOTO_FILTERS, silly: SILLY_FILTERS, highlight: setting_(settings, 'Highlight Video') };
 }
 
 // Part of one shared photo or video (base64), for the builder to put together on the computer.
@@ -2455,6 +2515,8 @@ function setupPhotoSheet_(c) {
     sh.setColumnWidth(i + 1, widths[h] || 120);
   });
   sh.getRange(2, header.indexOf(PHOTO_COL.hidden) + 1, maxRows - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  sh.getRange(2, header.indexOf(PHOTO_COL.filter) + 1, maxRows - 1, 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(PHOTO_FILTERS, true).setAllowInvalid(true).build());
   [PHOTO_COL.uploadedAt, PHOTO_COL.takenAt].forEach(function (h) {
     sh.getRange(2, header.indexOf(h) + 1, maxRows - 1, 1).setNumberFormat('mmm d, yyyy h:mm am/pm');
   });

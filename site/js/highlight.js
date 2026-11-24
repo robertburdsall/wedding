@@ -13,6 +13,7 @@
 
   const T = window.PhotoTools;
   const API = window.WeddingAPI;
+  const Fun = window.Fun; // silly filters (js/fun.js)
   const $ = (sel) => document.querySelector(sel);
   const app = $('#app');
 
@@ -476,7 +477,7 @@
 
   // One frame: the picture fitted inside, over a blurred, darker copy that fills the edges
   // (so tall phone videos look good in a wide video, and the other way round).
-  function drawFrame(source, sw, sh, filter, { alpha = 1, zoom = 1, credit = '' } = {}) {
+  function drawFrame(source, sw, sh, filter, { alpha = 1, zoom = 1, credit = '', faces = [], t = 0 } = {}) {
     const W = canvas.width, H = canvas.height;
     ctx.save();
     ctx.globalAlpha = 1;
@@ -492,6 +493,7 @@
       ctx.filter = css;
       ctx.drawImage(source, (W - sw * fit) / 2, (H - sh * fit) / 2, sw * fit, sh * fit);
       ctx.filter = 'none';
+      if (Fun && Fun.isSilly(filter)) Fun.draw(ctx, filter, faces, { x: (W - sw * fit) / 2, y: (H - sh * fit) / 2, w: sw * fit, h: sh * fit }, t);
     }
     if (credit) {
       const size = Math.round(Math.min(W, H) / 26);
@@ -632,7 +634,12 @@
           img.src = e.url;
           await img.decode().catch(() => {});
           const len = itemLength(item);
-          await hold(len, (t) => drawFrame(img, img.naturalWidth, img.naturalHeight, item.filter, { alpha: fade(t, len), zoom: 1 + 0.06 * (t / len), credit }));
+          // Face filters use the faces saved when the photo was taken, or find them now.
+          let faces = it.faces || [];
+          if (Fun && Fun.needsFaces(item.filter) && !faces.length) {
+            try { faces = it.faces = await Fun.detectImage(img); } catch (err) { faces = []; }
+          }
+          await hold(len, (t) => drawFrame(img, img.naturalWidth, img.naturalHeight, item.filter, { alpha: fade(t, len), zoom: 1 + 0.06 * (t / len), credit, faces, t: t + 1 }));
           done += len;
           continue;
         }
@@ -654,12 +661,23 @@
         src.connect(gain).connect(master);
         if (musicGain) musicGain.gain.setTargetAtTime(settings.musicVolume * (settings.clipVolume > 0 ? 0.55 : 1), ac.currentTime, 0.3);
         await v.play().catch(() => {});
+        // Face filters follow the faces saved while it was filmed, or find them as it plays.
+        const saved = it.track && it.track.f && it.track.f.some((f) => f.length);
+        const live = Fun && Fun.needsFaces(item.filter) && !saved;
+        let liveFaces = [];
+        let looking = false;
+        if (live) await Fun.loadDetector().catch(() => {});
         await new Promise((resolve) => {
           (function frame() {
             const t = v.currentTime - start;
             if (job.stopped || v.ended || t >= len) { resolve(); return; }
             gain.gain.value = settings.clipVolume * (settings.fades ? Math.max(0, Math.min(1, t / FADE, (len - t) / FADE)) : 1);
-            drawFrame(v, v.videoWidth, v.videoHeight, item.filter, { alpha: fade(t, len), credit });
+            if (live && !looking) {
+              looking = true;
+              Fun.detectVideo(v).then((f) => { liveFaces = f; }).catch(() => {}).finally(() => { looking = false; });
+            }
+            const faces = saved ? Fun.facesAt(it.track, v.currentTime) : liveFaces;
+            drawFrame(v, v.videoWidth, v.videoHeight, item.filter, { alpha: fade(t, len), credit, faces, t: v.currentTime });
             progress(t);
             requestAnimationFrame(frame);
           })();

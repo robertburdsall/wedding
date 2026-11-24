@@ -1798,7 +1798,7 @@ describe('photo sharing', () => {
   test('setup makes a Photos tab, a secret photo code and the photo links', () => {
     const env = setup();
     assert.deepEqual(env.ss.getSheetByName('Photos').rows()[0],
-      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status', 'Type', 'Filter', 'Seconds', 'Still File ID']);
+      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status', 'Type', 'Filter', 'Seconds', 'Still File ID', 'Faces']);
     const s = env.gs.readSettings_(env.c);
     assert.match(s['Photo Code'], /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
     assert.equal(s['Photo Page Link'], `https://stephanieandrobert.test/photos/?t=${s['Photo Code']}`);
@@ -2467,6 +2467,53 @@ describe('videos, filters and the highlight builder', () => {
     assert.equal(list(env, { device: 'phone-ffff-0001' }).data.photos[0].filter, '');
   });
 
+  test('silly filters keep the original and save where the faces are', () => {
+    const env = setup();
+    const face = [400, 400, 600, 400, 500, 520, 500, 640];
+    const res = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'mustache', faces: [face], device: 'phone-fun-0001' });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(res.data.photo.filter, 'Mustache');
+    assert.deepEqual(res.data.photo.faces, [face]);
+    assert.equal(photoRows(env)[0].Faces, JSON.stringify([face]));
+    // Only one file: the original.
+    assert.equal([...env.drive.files.values()].length, 1);
+    // A video's faces over time come back as a track, only while a silly filter is on.
+    const track = { fps: 5, f: [[face], [face], []] };
+    const v = sendVideo(env, fakeVideo(1000), { device: 'phone-fun-0001', filter: 'Top Hat', track });
+    assert.equal(v.ok, true, JSON.stringify(v));
+    assert.deepEqual(v.data.photo.track, track);
+    const mine = () => list(env, { device: 'phone-fun-0001' }).data.photos;
+    assert.deepEqual(mine().map((p) => p.track || p.faces), [[face], track]);
+    // Switch the photo to a color filter on the sheet: the faces stay saved but aren't sent.
+    const sheet = env.ss.getSheetByName('Photos');
+    const col = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf('Filter') + 1;
+    sheet.getRange(2, col).setValue('Warm');
+    assert.equal(mine()[0].faces, undefined);
+    // ...and switch it to a different silly one: drawn on the same faces.
+    sheet.getRange(2, col).setValue('Sombrero');
+    assert.deepEqual(mine()[0].faces, [face]);
+    // The builder gets faces for everything.
+    sheet.getRange(2, col).setValue('');
+    assert.deepEqual(review(env).data.items[0].faces, [face]);
+  });
+
+  test('bad face data is ignored, and a long track is thinned to fit a cell', () => {
+    const env = setup();
+    const bad = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'Puppy', faces: [[1, 2, 3]], device: 'phone-fun-0002' });
+    assert.equal(bad.ok, true);
+    assert.equal(bad.data.photo.faces, undefined);
+    assert.equal(photoRows(env)[0].Faces, '');
+    assert.equal(apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'Puppy', faces: [['=HYPERLINK()', 1, 2, 3, 4, 5, 6, 7]], device: 'phone-fun-0002' }).data.photo.faces, undefined);
+    // 60 seconds at 10 per second with 4 faces each is too much for one cell: it's thinned out.
+    const busy = Array.from({ length: 4 }, (_, i) => [100 + i, 400, 600, 400, 500, 520, 500, 640]);
+    const big = { fps: 10, f: Array.from({ length: 600 }, () => busy) };
+    const v = sendVideo(env, fakeVideo(1000), { device: 'phone-fun-0002', filter: 'Shades', track: big, seconds: 30 });
+    assert.equal(v.ok, true, JSON.stringify(v));
+    assert.ok(v.data.photo.track.fps < 10);
+    assert.ok(JSON.stringify(v.data.photo.track).length <= 45000);
+    assert.ok(String(photoRows(env)[1].Faces).length <= 45000);
+  });
+
   test('an older Photos tab gets the new columns the first time a video arrives', () => {
     const env = setup();
     const sheet = env.ss.getSheetByName('Photos');
@@ -2491,7 +2538,7 @@ describe('videos, filters and the highlight builder', () => {
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.deepEqual(r.data.items.map((i) => [i.kind, i.hidden]), [['video', false], ['photo', true]]);
     assert.equal(r.data.items[0].filter, 'Film');
-    assert.deepEqual(r.data.filters, ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage']);
+    assert.deepEqual(r.data.filters, ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage', 'Mustache', 'Sombrero', 'Top Hat', 'Puppy', 'Shades', 'Party Hat', 'Taco Rain', 'Hearts']);
     // The photo code (on every table card) doesn't open it, and wrong guesses count as misses.
     assert.equal(review(env, photoCode(env)).error, 'not_found');
     assert.equal(review(env, '').error, 'bad_request');

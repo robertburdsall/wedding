@@ -51,17 +51,17 @@
           <p class="photos-hero__text" id="photos-intro">Add your photos and videos from the reception. They come straight to us, and we'll send everyone the album after the wedding.</p>
           <div id="add-area">
             <div class="photos-actions">
-              <!-- Phones: opens the camera right away. Hidden on computers (see photos.js). -->
+              <!-- The camera right on the page, for photos and videos (js/camera.js). -->
+              <button type="button" class="btn photos-add" id="camera-open" hidden>
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.4-2h5.8l1.4 2h2.2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5zM12 16.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></svg>
+                <span id="camera-open-label">Take photos &amp; videos</span>
+              </button>
+              <!-- Fallback where the page can't use the camera: the phone's own camera app. -->
               <label class="btn photos-add" for="camera-input" id="camera-button" hidden>
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.4-2h5.8l1.4 2h2.2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5zM12 16.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></svg>
                 Take a photo
               </label>
               <input type="file" id="camera-input" class="visually-hidden" accept="image/*" capture="environment">
-              <!-- Records right on the page (js/recorder.js). Hidden where the browser can't. -->
-              <button type="button" class="btn photos-add" id="video-button" hidden>
-                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4.5 7h10A1.5 1.5 0 0 1 16 8.5v7a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 3 15.5v-7A1.5 1.5 0 0 1 4.5 7zM16 10.5l5-3v9l-5-3"/></svg>
-                Record a video
-              </button>
               <!-- Everyone: pick photos already taken (camera roll, files). -->
               <label class="btn photos-add" for="photo-input" id="choose-button">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11A1.5 1.5 0 0 1 4.5 5zM3 15.5l5-4.5 4 3.5 3-2.5 6 5M15.5 9.2a1.2 1.2 0 1 0 0-.01"/></svg>
@@ -124,36 +124,66 @@
     <button class="lightbox__close" type="button" data-action="close" aria-label="Close">&times;</button>
     <button class="lightbox__nav lightbox__nav--prev" type="button" data-action="prev" aria-label="Previous photo">&lsaquo;</button>
     <figure class="photo-lightbox__figure">
-      <img class="lightbox__img" id="lightbox-img" alt="">
+      <div class="fun-wrap" id="lightbox-photo">
+        <img class="lightbox__img" id="lightbox-img" alt="">
+        <canvas class="fun-wrap__canvas" id="lightbox-fun" aria-hidden="true" hidden></canvas>
+      </div>
       <div class="photo-lightbox__video" id="lightbox-video" hidden></div>
       <figcaption class="photo-lightbox__caption" id="lightbox-caption"></figcaption>
     </figure>
     <button class="lightbox__nav lightbox__nav--next" type="button" data-action="next" aria-label="Next photo">&rsaquo;</button>
   </div>
 
-  <!-- Video camera (js/recorder.js) -->
-  <div class="recorder" id="recorder" hidden role="dialog" aria-modal="true" aria-label="Record a video">
-    <video class="recorder__view" id="rec-live" playsinline muted autoplay></video>
-    <video class="recorder__view" id="rec-replay" playsinline loop hidden></video>
-    <p class="recorder__message" id="rec-message" hidden></p>
-    <div class="recorder__top">
-      <button type="button" class="recorder__icon" id="rec-close" aria-label="Close the camera">&times;</button>
-      <span class="recorder__timer" id="rec-timer">0:00 / 0:30</span>
-      <button type="button" class="recorder__icon" id="rec-flip" aria-label="Switch camera" hidden>
-        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.4-2h5.8l1.4 2h2.2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5zM9 12.5a3 3 0 0 1 5.2-2M15 12.5a3 3 0 0 1-5.2 2M14.6 8.6l-.4 1.9 1.9.3M9.4 16.4l.4-1.9-1.9-.3"/></svg>
-      </button>
+  <!-- Who's taking them (asked once, if we don't already know) -->
+  <div class="share-sheet" id="name-sheet" hidden>
+    <form class="share-sheet__panel" id="name-form" novalidate>
+      <h2 class="share-sheet__title">Who's taking these?</h2>
+      <p class="share-sheet__intro">So we know who to thank. You can skip this.</p>
+      <label class="field-label" for="name-input">Your name <span class="optional">(optional)</span></label>
+      <input class="input" id="name-input" maxlength="60" autocomplete="name" placeholder="Your name">
+      <div class="share-sheet__actions">
+        <button type="submit" class="btn">Open the camera</button>
+        <button type="button" class="btn btn--ghost" id="name-skip">Skip</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- The camera: photos and videos (js/camera.js) -->
+  <div class="camera" id="camera" hidden role="dialog" aria-modal="true" aria-label="Camera" data-mode="photo">
+    <div class="camera__stage" id="cam-stage">
+      <video class="camera__view" id="cam-live" playsinline muted autoplay></video>
+      <video class="camera__view camera__view--replay" id="cam-replay" playsinline loop hidden></video>
+      <canvas class="camera__fun" id="cam-fun" aria-hidden="true"></canvas>
+      <div class="camera__flash" id="cam-flash"></div>
+      <p class="camera__message" id="cam-message" hidden></p>
     </div>
-    <div class="recorder__bottom">
-      <div class="filter-chips filter-chips--dark" id="rec-filters" aria-label="Filter"></div>
-      <div class="recorder__controls" id="rec-controls">
-        <button type="button" class="recorder__shutter" id="rec-shutter" aria-label="Start recording" disabled>
-          <svg class="recorder__ring" id="rec-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37" pathLength="1"/></svg>
-          <span class="recorder__dot"></span>
+    <div class="camera__top">
+      <button type="button" class="camera__icon" id="cam-close" aria-label="Close the camera">&times;</button>
+      <span class="camera__status" id="cam-status"></span>
+      <span class="camera__spacer"></span>
+    </div>
+    <div class="camera__bottom">
+      <div class="filter-chips filter-chips--dark" id="cam-filters" aria-label="Filter"></div>
+      <div class="camera__modes" id="cam-modes" role="group" aria-label="Photo or video">
+        <button type="button" data-mode="photo" aria-pressed="true">Photo</button>
+        <button type="button" data-mode="video" aria-pressed="false">Video</button>
+      </div>
+      <div class="camera__controls" id="cam-controls">
+        <button type="button" class="camera__last" id="cam-last" aria-label="Done: back to your photos" hidden>
+          <canvas id="cam-last-img" width="96" height="96"></canvas>
+          <span class="camera__count" id="cam-last-count"></span>
+        </button>
+        <button type="button" class="camera__shutter" id="cam-shutter" aria-label="Take a photo" disabled>
+          <svg class="camera__ring" id="cam-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37" pathLength="1"/></svg>
+          <span class="camera__dot"></span>
+        </button>
+        <button type="button" class="camera__icon camera__flip" id="cam-flip" aria-label="Switch camera">
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.4-2h5.8l1.4 2h2.2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5zM9 12.5a3 3 0 0 1 5.2-2M15 12.5a3 3 0 0 1-5.2 2M14.6 8.6l-.4 1.9 1.9.3M9.4 16.4l.4-1.9-1.9-.3"/></svg>
         </button>
       </div>
-      <div class="recorder__review" id="rec-review" hidden>
-        <button type="button" class="btn recorder__btn recorder__btn--ghost" id="rec-retake">Retake</button>
-        <button type="button" class="btn recorder__btn" id="rec-use">Use this video</button>
+      <div class="camera__review" id="cam-review" hidden>
+        <button type="button" class="btn camera__btn camera__btn--ghost" id="cam-retake">Retake</button>
+        <button type="button" class="btn camera__btn" id="cam-use">Use this video</button>
       </div>
     </div>
   </div>
@@ -166,7 +196,8 @@
   <script src="../js/config.js"></script>
   <script src="../js/api.js"></script>
   <script src="../js/photo-tools.js"></script>
-  <script src="../js/recorder.js"></script>
+  <script src="../js/fun.js"></script>
+  <script src="../js/camera.js"></script>
   <script src="../js/photos.js"></script>
 </body>
 </html>
