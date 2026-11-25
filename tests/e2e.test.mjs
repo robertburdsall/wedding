@@ -353,26 +353,12 @@ describe('photo page helpers (js/photo-tools.js)', () => {
     return window.Fun;
   }
 
-  test('silly filters: which need faces, and faces between saved moments of a video', () => {
+  test('silly filters are just tacos and hearts', () => {
     const Fun = loadFun();
-    assert.equal(Fun.needsFaces('Mustache'), true);
-    assert.equal(Fun.needsFaces('Taco Rain'), false);
+    assert.deepEqual([...Fun.NAMES], ['Taco Rain', 'Hearts']);
     assert.equal(Fun.isSilly('Taco Rain'), true);
+    assert.equal(Fun.isSilly('Mustache'), false);
     assert.equal(Fun.isSilly('Warm'), false);
-    const track = { fps: 5, f: [[[100, 100, 200, 100, 150, 150, 150, 200]], [[200, 100, 300, 100, 250, 150, 250, 200]], []] };
-    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(track, 0.1))), [[150, 100, 250, 100, 200, 150, 200, 200]]); // halfway
-    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(track, 0))), track.f[0]);
-    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(track, 60))), []); // past the end: the last moment
-    assert.deepEqual(JSON.parse(JSON.stringify(Fun.facesAt(null, 1))), []);
-    // The tracker fills gaps with the last faces it saw.
-    const tr = Fun.tracker();
-    tr.add(0, [[1, 2, 3, 4, 5, 6, 7, 8]]);
-    tr.add(0.6, []);
-    const done = JSON.parse(JSON.stringify(tr.done(1)));
-    assert.equal(done.fps, 5);
-    assert.equal(done.f.length, 6);
-    assert.deepEqual(done.f[1], [[1, 2, 3, 4, 5, 6, 7, 8]]);
-    assert.deepEqual(done.f[5], []);
   });
 
   test('video links, filters and times', () => {

@@ -236,3 +236,12 @@ body.no-scroll { overflow: hidden; }
 .camera__btn { flex: 1; max-width: 220px; padding-inline: 0.8em; white-space: nowrap; letter-spacing: 0.12em; background: #fff; color: var(--color-dark); border-color: #fff; }
 .camera__btn--ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.8); }
 .share-sheet__intro { margin: -6px 0 6px; text-align: center; color: var(--color-text-muted); }
+
+/* "Remove this photo" in the full-screen view (guests' own, before the album is published) */
+.lightbox .photo-lightbox__remove {
+  position: static; width: auto; height: auto; justify-self: center; margin-top: 2px;
+  padding: 8px 16px; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 999px;
+  font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; line-height: 1.2; opacity: 0.9;
+}
+.lightbox .photo-lightbox__remove:hover { background: rgba(255, 255, 255, 0.12); }
+.lightbox .photo-lightbox__remove:disabled { opacity: 0.5; cursor: default; }

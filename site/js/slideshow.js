@@ -82,7 +82,7 @@
     ctx.clearRect(0, 0, w, h);
     if (!window.Fun || !Fun.isSilly(p.filter) || !p.w || !p.h) return;
     const s = Math.min(w / p.w, h / p.h);
-    Fun.draw(ctx, p.filter, p.faces || [], { x: (w - p.w * s) / 2, y: (h - p.h * s) / 2, w: p.w * s, h: p.h * s }, 1.3);
+    Fun.draw(ctx, p.filter, { x: (w - p.w * s) / 2, y: (h - p.h * s) / 2, w: p.w * s, h: p.h * s }, 1.3);
   }
 
   function pick() {

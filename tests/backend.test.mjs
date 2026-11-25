@@ -1798,7 +1798,7 @@ describe('photo sharing', () => {
   test('setup makes a Photos tab, a secret photo code and the photo links', () => {
     const env = setup();
     assert.deepEqual(env.ss.getSheetByName('Photos').rows()[0],
-      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status', 'Type', 'Filter', 'Seconds', 'Still File ID', 'Faces']);
+      ['Uploaded At', 'Taken At', 'From', 'Caption', 'Table', 'Hidden', 'Preview', 'Photo', 'File ID', 'Width', 'Height', 'Upload ID', 'Uploader ID', 'Album Status', 'Type', 'Filter', 'Seconds', 'Still File ID']);
     const s = env.gs.readSettings_(env.c);
     assert.match(s['Photo Code'], /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
     assert.equal(s['Photo Page Link'], `https://stephanieandrobert.test/photos/?t=${s['Photo Code']}`);
@@ -2324,20 +2324,26 @@ describe('reception guests: emails, personal cameras and the album', () => {
 describe('videos, filters and the highlight builder', () => {
   const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake still bytes')]).toString('base64');
   const PIECE = 256 * 1024;
+  const GUEST = 9 * 256 * 1024; // the size of guests' video pieces
   const photoCode = (env) => env.gs.readSettings_(env.c)['Photo Code'];
   const reviewCode = (env) => env.gs.readSettings_(env.c)['Review Code'];
   const list = (env, extra = {}) => apiGet(env, { action: 'photos', t: photoCode(env), ...extra });
   const review = (env, k = reviewCode(env)) => apiGet(env, { action: 'review', k });
   const photoRows = (env) => env.ss.getSheetByName('Photos').objects();
   // A made-up "video": about 2.3 pieces of patterned bytes.
-  const fakeVideo = (size = Math.round(PIECE * 2.3), seed = 7) => Buffer.from(Array.from({ length: size }, (_, i) => (i * seed + (i >> 8)) & 255));
+  const fakeVideo = (size = Math.round(GUEST * 2.3), seed = 7) => {
+    const b = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) b[i] = (i * seed + (i >> 8)) & 255;
+    return b;
+  };
 
   // Sends a whole video the way the camera page does: start, pieces, finish.
-  function sendVideo(env, bytes, { code = photoCode(env), k, piece = PIECE, ...extra } = {}) {
+  function sendVideo(env, bytes, { code = photoCode(env), k, ...extra } = {}) {
     const auth = k ? { k } : { code };
     const uploadId = extra.uploadId || `vid-${Math.random().toString(36).slice(2)}`;
     const start = apiPost(env, { action: 'video', step: 'start', ...auth, uploadId, mime: 'video/mp4', size: bytes.length, seconds: 12, device: 'phone-vvvv-0001', ...extra });
     if (!start.ok || start.data.complete) return start;
+    const piece = start.data.chunkSize;
     let offset = start.data.received;
     while (offset < bytes.length) {
       const r = apiPost(env, { action: 'video', step: 'chunk', ...auth, uploadId, offset, data: bytes.subarray(offset, offset + piece).toString('base64') });
@@ -2378,24 +2384,33 @@ describe('videos, filters and the highlight builder', () => {
     // Only that phone sees it before the album is published.
     assert.equal(list(env, { device: 'phone-vvvv-0001' }).data.photos[0].kind, 'video');
     assert.deepEqual(list(env, { device: 'phone-zzzz-9999' }).data.photos, []);
-    // Nothing is left in the upload cache.
+    // Nothing is left in the upload cache, and the pieces were thrown away.
     assert.equal([...env.cache.store.keys()].filter((k) => k.startsWith('upload:')).length, 0);
+    const pieces = [...env.drive.files.values()].filter((f) => f.contentType === 'text/plain');
+    assert.equal(pieces.length, 3);
+    assert.ok(pieces.every((f) => f.trashed));
+    assert.equal(env.drive.folders.get(pieces[0].folder).name, 'Stephanie & Robert — Wedding Photos (uploads in progress)');
+    // Guests' videos never use Drive's separate upload service.
+    assert.equal(env.drive.fetches.length, 0);
   });
 
-  test('a piece that already arrived is skipped, a Drive hiccup can be retried, and a lost reply isn\'t saved twice', () => {
+  test('a piece that already arrived is skipped, a wrong-sized one is refused, and a lost reply isn\'t saved twice', () => {
     const env = setup();
     const bytes = fakeVideo();
     const uploadId = 'vid-retry-1';
     const base = { action: 'video', code: photoCode(env), uploadId };
-    assert.equal(apiPost(env, { ...base, step: 'start', mime: 'video/webm;codecs=vp9,opus', size: bytes.length, seconds: 9, device: 'phone-rrrr-0001' }).ok, true);
-    const piece = (offset) => apiPost(env, { ...base, step: 'chunk', offset, data: bytes.subarray(offset, offset + PIECE).toString('base64') });
-    assert.equal(piece(0).data.received, PIECE);
-    // The phone didn't hear back and sends the first piece again: told to carry on from PIECE.
-    assert.deepEqual(piece(0).data, { received: PIECE, complete: false });
-    env.drive.failPieces = 1;
-    assert.equal(piece(PIECE).error, 'upload_failed');
-    assert.equal(piece(PIECE).data.received, 2 * PIECE);
-    assert.deepEqual(piece(2 * PIECE).data, { received: bytes.length, complete: true });
+    const start = apiPost(env, { ...base, step: 'start', mime: 'video/webm;codecs=vp9,opus', size: bytes.length, seconds: 9, device: 'phone-rrrr-0001' });
+    assert.deepEqual(start.data, { chunkSize: GUEST, received: 0 });
+    const piece = (offset, size = GUEST) => apiPost(env, { ...base, step: 'chunk', offset, data: bytes.subarray(offset, offset + size).toString('base64') });
+    assert.equal(piece(0).data.received, GUEST);
+    // The phone didn't hear back and sends the first piece again: told to carry on from GUEST.
+    assert.deepEqual(piece(0).data, { received: GUEST, complete: false });
+    // A piece of the wrong size (which couldn't be joined back up) is refused.
+    assert.equal(piece(GUEST, GUEST - 3).error, 'bad_request');
+    assert.equal(piece(GUEST).data.received, 2 * GUEST);
+    // Finishing before the last piece arrives just asks for the rest.
+    assert.equal(apiPost(env, { ...base, step: 'finish', poster: JPEG }).error, 'upload_incomplete');
+    assert.deepEqual(piece(2 * GUEST).data, { received: bytes.length, complete: true });
     const done = apiPost(env, { ...base, step: 'finish', poster: JPEG });
     assert.equal(done.ok, true, JSON.stringify(done));
     // The reply to "finish" got lost, so the phone sends it again (or starts over).
@@ -2405,8 +2420,20 @@ describe('videos, filters and the highlight builder', () => {
     const video = env.drive.files.get(done.data.photo.id);
     assert.equal(video.contentType, 'video/webm');
     assert.ok(video.bytes.equals(bytes));
-    // Every Drive call sent the script's own login, and none followed the 308 as a redirect.
-    assert.ok(env.drive.fetches.every((f) => f.headers.Authorization === 'Bearer mock-oauth-token'));
+  });
+
+  test('pieces of videos that never finished are cleared out each morning', () => {
+    const env = setup();
+    const bytes = fakeVideo();
+    const base = { action: 'video', code: photoCode(env), uploadId: 'vid-abandoned' };
+    apiPost(env, { ...base, step: 'start', mime: 'video/mp4', size: bytes.length, device: 'phone-aaaa-0009' });
+    apiPost(env, { ...base, step: 'chunk', offset: 0, data: bytes.subarray(0, GUEST).toString('base64') });
+    const piece = [...env.drive.files.values()].find((f) => f.contentType === 'text/plain');
+    env.gs.dailyTasks();
+    assert.equal(piece.trashed, false, 'a fresh piece is kept (the guest may still be uploading)');
+    piece.created = new Date(Date.now() - 25 * 3600e3); // a day later
+    env.gs.dailyTasks();
+    assert.equal(piece.trashed, true);
   });
 
   test('an upload that waited too long starts over cleanly', () => {
@@ -2467,51 +2494,70 @@ describe('videos, filters and the highlight builder', () => {
     assert.equal(list(env, { device: 'phone-ffff-0001' }).data.photos[0].filter, '');
   });
 
-  test('silly filters keep the original and save where the faces are', () => {
+  test('only tacos and hearts are left of the silly filters', () => {
     const env = setup();
-    const face = [400, 400, 600, 400, 500, 520, 500, 640];
-    const res = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'mustache', faces: [face], device: 'phone-fun-0001' });
-    assert.equal(res.ok, true, JSON.stringify(res));
-    assert.equal(res.data.photo.filter, 'Mustache');
-    assert.deepEqual(res.data.photo.faces, [face]);
-    assert.equal(photoRows(env)[0].Faces, JSON.stringify([face]));
-    // Only one file: the original.
-    assert.equal([...env.drive.files.values()].length, 1);
-    // A video's faces over time come back as a track, only while a silly filter is on.
-    const track = { fps: 5, f: [[face], [face], []] };
-    const v = sendVideo(env, fakeVideo(1000), { device: 'phone-fun-0001', filter: 'Top Hat', track });
-    assert.equal(v.ok, true, JSON.stringify(v));
-    assert.deepEqual(v.data.photo.track, track);
-    const mine = () => list(env, { device: 'phone-fun-0001' }).data.photos;
-    assert.deepEqual(mine().map((p) => p.track || p.faces), [[face], track]);
-    // Switch the photo to a color filter on the sheet: the faces stay saved but aren't sent.
+    const taco = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'taco rain', device: 'phone-fun-0001' });
+    assert.equal(taco.data.photo.filter, 'Taco Rain');
+    // The face filters were taken out: an old one on the sheet just shows the original.
+    const old = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'Mustache', device: 'phone-fun-0001' });
+    assert.equal(old.data.photo.filter, '');
     const sheet = env.ss.getSheetByName('Photos');
     const col = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf('Filter') + 1;
-    sheet.getRange(2, col).setValue('Warm');
-    assert.equal(mine()[0].faces, undefined);
-    // ...and switch it to a different silly one: drawn on the same faces.
-    sheet.getRange(2, col).setValue('Sombrero');
-    assert.deepEqual(mine()[0].faces, [face]);
-    // The builder gets faces for everything.
-    sheet.getRange(2, col).setValue('');
-    assert.deepEqual(review(env).data.items[0].faces, [face]);
+    sheet.getRange(2, col).setValue('Top Hat');
+    assert.equal(list(env, { device: 'phone-fun-0001' }).data.photos[0].filter, '');
   });
 
-  test('bad face data is ignored, and a long track is thinned to fit a cell', () => {
+  test('guests can remove what they shared, with their link or from the same phone, until the album is published', () => {
     const env = setup();
-    const bad = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'Puppy', faces: [[1, 2, 3]], device: 'phone-fun-0002' });
-    assert.equal(bad.ok, true);
-    assert.equal(bad.data.photo.faces, undefined);
-    assert.equal(photoRows(env)[0].Faces, '');
-    assert.equal(apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, filter: 'Puppy', faces: [['=HYPERLINK()', 1, 2, 3, 4, 5, 6, 7]], device: 'phone-fun-0002' }).data.photo.faces, undefined);
-    // 60 seconds at 10 per second with 4 faces each is too much for one cell: it's thinned out.
-    const busy = Array.from({ length: 4 }, (_, i) => [100 + i, 400, 600, 400, 500, 520, 500, 640]);
-    const big = { fps: 10, f: Array.from({ length: 600 }, () => busy) };
-    const v = sendVideo(env, fakeVideo(1000), { device: 'phone-fun-0002', filter: 'Shades', track: big, seconds: 30 });
-    assert.equal(v.ok, true, JSON.stringify(v));
-    assert.ok(v.data.photo.track.fps < 10);
-    assert.ok(JSON.stringify(v.data.photo.track).length <= 45000);
-    assert.ok(String(photoRows(env)[1].Faces).length <= 45000);
+    env.gs.submitRsvp_(env.c, { action: 'rsvp', code: env.code(0), attendance: { ceremony: ['Alice Smith'], reception: ['Alice Smith', 'Bob Smith'] } }, new Date());
+    const alice = env.gs.cameraLink_(env.gs.readSettings_(env.c), env.code(0), 'Alice Smith').split('me=')[1];
+    const bob = env.gs.cameraLink_(env.gs.readSettings_(env.c), env.code(0), 'Bob Smith').split('me=')[1];
+    const del = (extra) => apiPost(env, { action: 'delete', code: photoCode(env), ...extra });
+    const photo = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, me: alice, device: 'phone-alice-01' }).data.photo;
+    const video = sendVideo(env, fakeVideo(1000), { me: alice, device: 'phone-alice-01' }).data.photo;
+    const other = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, device: 'phone-table-02' }).data.photo;
+    // Someone else (another guest's link, another phone, a guess) can't.
+    assert.equal(del({ id: photo.id, me: bob }).error, 'not_yours');
+    assert.equal(del({ id: photo.id, device: 'phone-zzzz-9999' }).error, 'not_yours');
+    assert.equal(del({ id: photo.id }).error, 'not_yours');
+    assert.equal(del({ id: photo.id, code: 'WRONGONE', me: alice }).error, 'not_found');
+    // Alice can, from her link on any phone. The file goes to the trash and she gets the shot back.
+    const r = del({ id: photo.id, me: alice, device: 'phone-other-99' });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.data.you.used, 0);
+    assert.equal(env.drive.files.get(photo.id).trashed, true);
+    assert.equal(del({ id: photo.id, me: alice }).error, 'not_found');
+    // Her video (and its still) too.
+    assert.equal(del({ id: video.id, me: alice }).data.you.videos.used, 0);
+    assert.equal(env.drive.files.get(video.id).trashed, true);
+    assert.equal(env.drive.files.get(video.poster).trashed, true);
+    // A table-card guest can remove theirs from the same phone.
+    assert.deepEqual(photoRows(env).map((row) => row['File ID']), [other.id]);
+    // After the album is published, nothing can be removed from the page.
+    env.gs.publishAlbum_(env.c, new Date());
+    assert.equal(del({ id: other.id, device: 'phone-table-02' }).error, 'closed');
+    assert.equal(photoRows(env).length, 1);
+  });
+
+  test('an unexpected error is written to an Error Log tab and its reason comes back', () => {
+    const env = setup();
+    const k = reviewCode(env);
+    const photo = apiPost(env, { action: 'photo', code: photoCode(env), data: JPEG, device: 'phone-err-0001' }).data.photo;
+    // Drive's download service failing (like a missing permission) falls back to reading the file.
+    env.drive.throwFetch = true;
+    const r = apiGet(env, { action: 'media', k, id: photo.id });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(Buffer.from(r.data.data, 'base64').toString('base64'), JPEG);
+    const log = env.ss.getSheetByName('Error Log');
+    assert.ok(log, 'the error was logged');
+    assert.match(String(log.rows()[1][1]), /permission to call UrlFetchApp/);
+    // Saving a highlight can't fall back, so the reason comes back to the page.
+    const h = apiPost(env, { action: 'video', step: 'start', k, uploadId: 'hl-err', mime: 'video/mp4', size: 1000 });
+    assert.equal(h.error, 'server_error');
+    assert.match(h.detail, /permission to call UrlFetchApp/);
+    assert.equal(log.rows().length, 3);
+    // Guests' videos don't need it at all.
+    assert.equal(sendVideo(env, fakeVideo(1000), { device: 'phone-err-0001' }).ok, true);
   });
 
   test('an older Photos tab gets the new columns the first time a video arrives', () => {
@@ -2538,7 +2584,7 @@ describe('videos, filters and the highlight builder', () => {
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.deepEqual(r.data.items.map((i) => [i.kind, i.hidden]), [['video', false], ['photo', true]]);
     assert.equal(r.data.items[0].filter, 'Film');
-    assert.deepEqual(r.data.filters, ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage', 'Mustache', 'Sombrero', 'Top Hat', 'Puppy', 'Shades', 'Party Hat', 'Taco Rain', 'Hearts']);
+    assert.deepEqual(r.data.filters, ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage', 'Taco Rain', 'Hearts']);
     // The photo code (on every table card) doesn't open it, and wrong guesses count as misses.
     assert.equal(review(env, photoCode(env)).error, 'not_found');
     assert.equal(review(env, '').error, 'bad_request');
@@ -2581,8 +2627,12 @@ describe('videos, filters and the highlight builder', () => {
     const bytes = fakeVideo(PIECE * 3 + 5);
     // Guests can't save a highlight (the photo code isn't the review code).
     assert.equal(sendVideo(env, bytes, { k: photoCode(env) }).error, 'not_found');
-    const res = sendVideo(env, bytes, { k: reviewCode(env), seconds: 180 });
+    env.drive.failPieces = 1; // a Drive hiccup: the builder just tries that piece again
+    let res = sendVideo(env, bytes, { k: reviewCode(env), seconds: 180, uploadId: 'hl-1' });
+    assert.equal(res.error, 'upload_failed');
+    res = sendVideo(env, bytes, { k: reviewCode(env), seconds: 180, uploadId: 'hl-2' });
     assert.equal(res.ok, true, JSON.stringify(res));
+    assert.ok(env.drive.fetches.every((f) => f.headers.Authorization === 'Bearer mock-oauth-token'));
     const file = env.drive.files.get(res.data.highlight.id);
     assert.ok(file.bytes.equals(bytes));
     assert.match(file.name, /^Highlight video \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.mp4$/);

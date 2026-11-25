@@ -41,7 +41,9 @@ window.WeddingAPI = (function () {
       throw new ApiError('network', 'The RSVP service sent an unexpected reply. Please try again in a minute.');
     }
     if (!body || body.ok !== true) {
-      throw new ApiError((body && body.error) || 'server_error', (body && body.message) || 'Something went wrong. Please try again.');
+      const err = new ApiError((body && body.error) || 'server_error', (body && body.message) || 'Something went wrong. Please try again.');
+      err.detail = (body && body.detail) || ''; // what actually went wrong, for unexpected errors
+      throw err;
     }
     return body.data;
   }
@@ -116,6 +118,15 @@ window.WeddingAPI = (function () {
     }, 120000);
   }
 
+  // Removes a photo or video this camera shared ({ code, id, me, device }).
+  async function deleteUpload(payload) {
+    return request(apiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'delete', ...payload }),
+    });
+  }
+
   // The highlight builder: everything guests shared (needs the review code).
   async function getReview(k) {
     const url = new URL(apiUrl());
@@ -134,5 +145,5 @@ window.WeddingAPI = (function () {
     return request(url.toString(), { method: 'GET' }, 120000);
   }
 
-  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, getPhotos, uploadPhoto, videoStep, getReview, getMedia, ApiError };
+  return { getInvite, markOpened, submitRsvp, getMeals, saveMeals, getPhotos, uploadPhoto, videoStep, deleteUpload, getReview, getMedia, ApiError };
 })();

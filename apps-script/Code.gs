@@ -11,7 +11,7 @@
  */
 
 // Bump this with every change; "?action=ping" on the web app URL shows which version is live.
-var VERSION = '3.1.0';
+var VERSION = '3.2.0';
 
 var SHEET_NAMES = { guests: 'Guests', settings: 'Settings', summary: 'Summary', log: 'RSVP Log', photos: 'Photos' };
 
@@ -99,8 +99,7 @@ var PHOTO_COL = {
   kind: 'Type',
   filter: 'Filter',
   seconds: 'Seconds',
-  posterId: 'Still File ID',
-  faces: 'Faces'
+  posterId: 'Still File ID'
 };
 var PHOTO_HEADERS = Object.keys(PHOTO_COL).map(function (k) { return PHOTO_COL[k]; });
 var PHOTO_HEADER_NOTES = {
@@ -113,20 +112,20 @@ var PHOTO_HEADER_NOTES = {
   'Type': 'Photo or Video.',
   'Filter': 'The filter the guest picked. The file in Drive is always the original, unfiltered. Pick a different one, or clear it to show the photo or video without a filter.',
   'Seconds': 'How long the video is.',
-  'Still File ID': 'For videos: a still from the start of the video, shown in the album grid.',
-  'Faces': 'Where the faces are (saved when a silly face filter was used), so the mustache or hat can be drawn on the original. Filled in automatically.'
+  'Still File ID': 'For videos: a still from the start of the video, shown in the album grid.'
 };
 // Filters guests can pick: color looks (site/js/photo-tools.js) and silly ones (site/js/fun.js).
-// Only the name is saved (plus where the faces are, for the silly ones): the photo or video
-// itself is always kept unfiltered.
+// Only the name is saved: the photo or video itself is always kept unfiltered.
 var COLOR_FILTERS = ['Warm', 'Film', 'B&W', 'Soft', 'Vivid', 'Cool', 'Vintage'];
-var SILLY_FILTERS = ['Mustache', 'Sombrero', 'Top Hat', 'Puppy', 'Shades', 'Party Hat', 'Taco Rain', 'Hearts'];
+var SILLY_FILTERS = ['Taco Rain', 'Hearts'];
 var PHOTO_FILTERS = COLOR_FILTERS.concat(SILLY_FILTERS);
-var FACES_MAX_LENGTH = 45000; // a Sheets cell holds 50,000 characters
 // Videos are recorded on the camera page and sent to Drive in pieces.
 var VIDEO_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
-var VIDEO_CHUNK = 2 * 1024 * 1024; // each piece; Drive needs multiples of 256 KB
-var VIDEO_MAX_BYTES = 60 * 1024 * 1024; // a 30-second clip is usually about 10 MB
+var VIDEO_CHUNK = 2 * 1024 * 1024; // highlight pieces; Drive needs multiples of 256 KB
+// Guests' videos come in pieces of this size (a multiple of 3, so the pieces' base64 text can
+// simply be joined back together), saved as small Drive files and joined when the last arrives.
+var GUEST_PIECE = 9 * 256 * 1024; // 2.25 MB
+var VIDEO_MAX_BYTES = 40 * 1024 * 1024; // a 30-second clip is usually about 10 MB
 var HIGHLIGHT_MAX_BYTES = 800 * 1024 * 1024;
 var MEDIA_PIECE = 3 * 1024 * 1024; // how much of a file the highlight builder fetches at a time
 var UPLOAD_SESSION_SECONDS = 6 * 60 * 60;
@@ -203,6 +202,7 @@ var SETTINGS_DEFAULTS = [
   ['Highlight Builder Link', '', 'Filled in automatically: open this on a computer (in Chrome) to put together the highlight video from guests\' clips.'],
   ['Highlight Video', '', 'Filled in when you save a highlight video from the builder: the link to send to people who couldn\'t make it.'],
   ['Video Stills Folder', '', 'Filled in automatically: where the still for each video\'s album tile is kept.'],
+  ['Uploads In Progress Folder', '', 'Filled in automatically: where pieces of videos wait while they upload. Old pieces are cleared out every morning.'],
   ['Camera Email Days Before', 3, 'How many days before the Ceremony Date to email each reception guest their personal camera link (around 9 AM). Blank = don\'t send automatically.'],
   ['Camera Email Subject', 'Your camera for our wedding', ''],
   ['Album Email Subject', 'Our wedding photos are here!', ''],
@@ -259,10 +259,30 @@ function respond_(fn) {
       out = { ok: false, error: err.code, message: err.message };
     } else {
       console.error(err && err.stack ? err.stack : err);
-      out = { ok: false, error: 'server_error', message: 'Something went wrong on our end. Please try again in a minute.' };
+      logServerError_(err);
+      out = {
+        ok: false, error: 'server_error', message: 'Something went wrong on our end. Please try again in a minute.',
+        detail: String(err && err.message ? err.message : err).slice(0, 300)
+      };
     }
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// Unexpected errors go on an "Error Log" tab, because Google doesn't keep logs for the web
+// app's (anonymous) visitors. Never throws.
+function logServerError_(err) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('Error Log');
+    if (!sh) {
+      sh = ss.insertSheet('Error Log');
+      sh.appendRow(['Time', 'Error', 'Where']);
+    }
+    if (sh.getLastRow() > 500) return; // enough to go on
+    var stack = String(err && err.stack ? err.stack : '').split('\n').slice(1, 4).join(' | ');
+    sh.appendRow([new Date(), safeText_(String(err && err.message ? err.message : err).slice(0, 500)), safeText_(stack.slice(0, 500))]);
+  } catch (e) { /* logging must never break the reply */ }
 }
 
 function parseBody_(e) {
@@ -314,6 +334,7 @@ function handlePost_(c, body, now) {
   if (body.action === 'meal') return submitMeals_(c, body, now);
   if (body.action === 'photo') return submitPhoto_(c, body, now);
   if (body.action === 'video') return submitVideo_(c, body, now);
+  if (body.action === 'delete') return deleteUpload_(c, body, now);
   fail_('bad_request', 'Unknown action.');
 }
 
@@ -1054,8 +1075,7 @@ function readPhotos_(c) {
       kind: /video/i.test(String(get(row, 'kind'))) ? 'video' : 'photo',
       filter: cleanFilter_(get(row, 'filter')),
       seconds: Number(get(row, 'seconds')) || 0,
-      posterId: String(get(row, 'posterId')).trim(),
-      facesRaw: String(get(row, 'faces')).trim()
+      posterId: String(get(row, 'posterId')).trim()
     };
   });
 }
@@ -1064,62 +1084,14 @@ function isoTime_(v) {
   return v instanceof Date && !isNaN(v.getTime()) ? v.toISOString() : '';
 }
 
-function publicPhoto_(p, withFaces) {
+function publicPhoto_(p) {
   var taken = isoTime_(p.takenAt) || isoTime_(p.uploadedAt);
   var out = { id: p.id, w: p.width, h: p.height, takenAt: taken, uploadedAt: isoTime_(p.uploadedAt) || taken, from: p.from, caption: p.caption, table: p.table, kind: p.kind || 'photo', filter: p.filter || '' };
   if (out.kind === 'video') {
     out.seconds = p.seconds || 0;
     out.poster = DRIVE_ID_.test(p.posterId || '') ? p.posterId : '';
   }
-  // Face positions go along only when they're needed to draw a silly filter (or to the builder).
-  if (p.facesRaw && (withFaces || SILLY_FILTERS.indexOf(out.filter) >= 0)) {
-    var faces = parseFaces_(p.facesRaw, out.kind);
-    if (faces) out[out.kind === 'video' ? 'track' : 'faces'] = faces;
-  }
   return out;
-}
-
-// [[8 numbers], ...]: up to 4 faces, each the right eye, left eye, nose and mouth (x, y) in
-// thousandths of the picture's width and height. null if it isn't that.
-function cleanFaceList_(v) {
-  if (!Array.isArray(v)) return null;
-  var out = [];
-  for (var i = 0; i < v.length && out.length < 4; i++) {
-    var f = v[i];
-    if (!Array.isArray(f) || f.length !== 8) return null;
-    for (var j = 0; j < 8; j++) {
-      if (typeof f[j] !== 'number' || !isFinite(f[j]) || f[j] < -500 || f[j] > 1500) return null;
-    }
-    out.push(f.map(function (n) { return Math.round(n); }));
-  }
-  return out;
-}
-
-// { fps, f: [faces per frame] } for a video. Thinned out if it's too long for one cell.
-function cleanTrack_(v) {
-  if (!v || typeof v !== 'object' || !Array.isArray(v.f)) return null;
-  var fps = Math.round(Number(v.fps));
-  if (!(fps >= 1 && fps <= 10) || v.f.length > fps * 130) return null;
-  var frames = [];
-  for (var i = 0; i < v.f.length; i++) {
-    var f = cleanFaceList_(v.f[i]);
-    if (!f) return null;
-    frames.push(f);
-  }
-  var track = { fps: fps, f: frames };
-  while (JSON.stringify(track).length > FACES_MAX_LENGTH && track.fps > 1) {
-    track = { fps: track.fps / 2, f: track.f.filter(function (x, k) { return k % 2 === 0; }) };
-  }
-  return JSON.stringify(track).length > FACES_MAX_LENGTH ? null : track;
-}
-
-function parseFaces_(raw, kind) {
-  try {
-    var v = JSON.parse(raw);
-    return kind === 'video' ? cleanTrack_(v) : cleanFaceList_(v);
-  } catch (err) {
-    return null;
-  }
 }
 
 var DRIVE_ID_ = /^[A-Za-z0-9_-]{10,200}$/;
@@ -1234,8 +1206,6 @@ function submitPhoto_(c, body, now) {
   var width = photoDimension_(body.width);
   var height = photoDimension_(body.height);
   var filter = cleanFilter_(body.filter);
-  var faces = body.faces === undefined ? null : cleanFaceList_(body.faces);
-  var facesRaw = faces && faces.length ? JSON.stringify(faces) : '';
 
   var folderId = withLock_(function () { return photoFolderId_(c, settings); });
   var fileName = Utilities.formatDate(takenAt, Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm.ss') +
@@ -1266,12 +1236,12 @@ function submitPhoto_(c, body, now) {
     appendPhotoRow_(c, {
       uploadedAt: now, takenAt: takenAt, from: safeText_(from), caption: safeText_(caption), table: safeText_(table),
       hidden: false, preview: previewFormula_(id), link: file.getUrl(), fileId: id, width: width, height: height,
-      uploadId: uploadId, uploader: uploader, kind: 'Photo', filter: filter, faces: facesRaw
+      uploadId: uploadId, uploader: uploader, kind: 'Photo', filter: filter
     });
     var you = allowance();
     you.name = person ? person.name : '';
     return {
-      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0, filter: filter, facesRaw: facesRaw }),
+      photo: publicPhoto_({ id: id, uploadedAt: now, takenAt: takenAt, from: from, caption: caption, table: table, width: Number(width) || 0, height: Number(height) || 0, filter: filter }),
       duplicate: false,
       you: you
     };
@@ -1562,25 +1532,69 @@ function startVideo_(c, settings, body, uploadId, highlight, now) {
       width: photoDimension_(body.width), height: photoDimension_(body.height), seconds: seconds > 0 ? seconds : '',
       filter: cleanFilter_(body.filter), uploader: uploader, personName: person ? person.name : ''
     };
-    var track = body.track === undefined ? null : cleanTrack_(body.track);
-    u.meta.facesRaw = track && track.f.some(function (f) { return f.length; }) ? JSON.stringify(track) : '';
     name = Utilities.formatDate(takenAt, tz, 'yyyy-MM-dd HH.mm.ss') + (from ? ' ' + from.replace(/[\\\/:*?"<>|]/g, '') : '') + '.' + VIDEO_TYPES[mime];
     description = u.meta.caption;
   }
   u.folderId = withLock_(function () { return photoFolderId_(c, settings); });
-  u.url = startDriveUpload_(u.folderId, name, mime, size, description);
+  u.name = name;
+  u.description = description;
+  if (highlight) {
+    // The highlight can be hundreds of MB, so it goes straight to Drive's upload service.
+    u.url = startDriveUpload_(u.folderId, name, mime, size, description);
+    saveUploadState_(u);
+    return { chunkSize: VIDEO_CHUNK, received: 0 };
+  }
+  u.pieces = [];
+  u.piecesFolderId = withLock_(function () { return piecesFolderId_(c, settings, u.folderId); });
   saveUploadState_(u);
-  return { chunkSize: VIDEO_CHUNK, received: 0 };
+  return { chunkSize: GUEST_PIECE, received: 0 };
+}
+
+// Where pieces of guests' videos wait until the whole video has arrived (cleaned up daily).
+function piecesFolderId_(c, settings, folderId) {
+  var raw = setting_(settings, 'Uploads In Progress Folder');
+  var m = raw.match(/folders\/([A-Za-z0-9_-]+)/) || raw.match(/^([A-Za-z0-9_-]{10,})$/);
+  if (m) {
+    try { return DriveApp.getFolderById(m[1]).getId(); } catch (err) { /* make a new one */ }
+  }
+  var f = DriveApp.createFolder(DriveApp.getFolderById(folderId).getName() + ' (uploads in progress)');
+  writeSetting_(c, 'Uploads In Progress Folder', f.getUrl());
+  settings['Uploads In Progress Folder'] = f.getUrl();
+  return f.getId();
+}
+
+// Throws away pieces of videos that never finished (more than a day old).
+function cleanUpPieces_(settings, now) {
+  var raw = setting_(settings, 'Uploads In Progress Folder');
+  var m = raw.match(/folders\/([A-Za-z0-9_-]+)/);
+  if (!m) return 0;
+  var n = 0;
+  var files = DriveApp.getFolderById(m[1]).getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    if (now.getTime() - f.getDateCreated().getTime() > 24 * 3600 * 1000) { f.setTrashed(true); n++; }
+  }
+  return n;
 }
 
 function videoChunk_(u, body) {
   if (u.fileId) return { received: u.size, complete: true };
   var offset = Math.floor(Number(body.offset));
   if (!(offset >= 0) || offset > u.size) fail_('bad_request', 'Bad position in the video.');
-  // A piece Drive already has (its reply got lost): say where to carry on from.
-  if (offset !== u.received) return { received: u.received, complete: false };
+  // A piece that already arrived (its reply got lost): say where to carry on from.
+  if (offset !== u.received) return { received: u.received, complete: u.received >= u.size };
   var data = typeof body.data === 'string' ? body.data : '';
   if (!data || !/^[A-Za-z0-9+\/]+={0,2}$/.test(data)) fail_('bad_request', 'Missing video data.');
+  if (u.pieces) {
+    // A guest's video: keep the piece (as base64 text) in a small Drive file.
+    var expected = Math.min(GUEST_PIECE, u.size - offset);
+    if (data.length !== 4 * Math.ceil(expected / 3)) fail_('bad_request', 'That piece of the video is the wrong size.');
+    var piece = DriveApp.getFolderById(u.piecesFolderId).createFile(u.uploadId + '.' + u.pieces.length + '.txt', data, 'text/plain');
+    u.pieces.push(piece.getId());
+    u.received = offset + expected;
+    saveUploadState_(u);
+    return { received: u.received, complete: u.received >= u.size };
+  }
   var bytes = Utilities.base64Decode(data);
   if (offset + bytes.length > u.size) fail_('bad_request', 'More video than expected.');
   if (offset + bytes.length < u.size && bytes.length % (256 * 1024) !== 0) fail_('bad_request', 'Pieces must be a multiple of 256 KB.');
@@ -1606,6 +1620,21 @@ function stillsFolderId_(c, settings, folderId) {
 }
 
 function finishVideo_(c, settings, u, body, now) {
+  if (!u.fileId && u.pieces && u.received >= u.size) {
+    // Join the pieces back into the video, then throw them away.
+    var text = u.pieces.map(function (id) { return DriveApp.getFileById(id).getBlob().getDataAsString(); }).join('');
+    var joined = Utilities.newBlob(Utilities.base64Decode(text), u.mime, u.name);
+    text = null;
+    var made = DriveApp.getFolderById(u.folderId).createFile(joined);
+    if (u.description) {
+      try { made.setDescription(u.description); } catch (err) { /* optional */ }
+    }
+    u.fileId = made.getId();
+    saveUploadState_(u);
+    u.pieces.forEach(function (id) {
+      try { DriveApp.getFileById(id).setTrashed(true); } catch (err) { /* cleaned up daily */ }
+    });
+  }
   if (!u.fileId) fail_('upload_incomplete', 'Part of the video is still missing. Trying again…');
   var file = DriveApp.getFileById(u.fileId);
   shareFile_(file);
@@ -1641,7 +1670,7 @@ function finishVideo_(c, settings, u, body, now) {
       uploadedAt: now, takenAt: takenAt, from: safeText_(m.from), caption: safeText_(m.caption), table: safeText_(m.table),
       hidden: false, preview: previewFormula_(posterId || u.fileId), link: file.getUrl(), fileId: u.fileId,
       width: m.width, height: m.height, uploadId: u.uploadId, uploader: m.uploader,
-      kind: 'Video', filter: m.filter, seconds: m.seconds, posterId: posterId, faces: m.facesRaw || ''
+      kind: 'Video', filter: m.filter, seconds: m.seconds, posterId: posterId
     });
     CacheService.getScriptCache().remove(uploadCacheKey_(u.uploadId));
     var you = photoAllowance_(readPhotos_(c), m.uploader, settings);
@@ -1649,12 +1678,42 @@ function finishVideo_(c, settings, u, body, now) {
     return {
       photo: publicPhoto_({
         id: u.fileId, uploadedAt: now, takenAt: takenAt, from: m.from, caption: m.caption, table: m.table,
-        width: Number(m.width) || 0, height: Number(m.height) || 0, kind: 'video', filter: m.filter, seconds: Number(m.seconds) || 0, posterId: posterId,
-        facesRaw: m.facesRaw || ''
+        width: Number(m.width) || 0, height: Number(m.height) || 0, kind: 'video', filter: m.filter, seconds: Number(m.seconds) || 0, posterId: posterId
       }),
       duplicate: false,
       you: you
     };
+  });
+}
+
+// A guest takes back a photo or video they shared (before the album is published). Only the
+// camera that shared it can: the same personal link, or the same phone.
+function deleteUpload_(c, body, now) {
+  var settings = readSettings_(c);
+  checkPhotoCode_(settings, body.code, now);
+  if (albumPublished_(settings)) fail_('closed', 'The album is finished, so this can\'t be removed here. Please ask Stephanie or Robert.');
+  var id = String(body.id || '');
+  if (!DRIVE_ID_.test(id)) fail_('bad_request', 'Which photo?');
+  var person = body.me ? cameraPerson_(c, body.me, now) : null;
+  var mine = [];
+  if (person) mine.push(person.id);
+  if (deviceId_(body.device)) mine.push(deviceId_(body.device));
+  return withLock_(function () {
+    var rows = readPhotos_(c);
+    var index = -1;
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === id) { index = i; break; }
+    if (index < 0) fail_('not_found', 'That one was already removed.');
+    var p = rows[index];
+    if (!p.uploader || mine.indexOf(p.uploader) < 0) fail_('not_yours', 'You can only remove photos and videos you shared.');
+    [p.id, p.posterId].forEach(function (fid) {
+      if (!DRIVE_ID_.test(fid || '')) return;
+      try { DriveApp.getFileById(fid).setTrashed(true); } catch (err) { /* already gone */ }
+    });
+    sheet_(c, 'photos').deleteRow(index + 2);
+    SpreadsheetApp.flush();
+    var you = photoAllowance_(readPhotos_(c), p.uploader, settings);
+    you.name = person ? person.name : '';
+    return { deleted: id, you: you };
   });
 }
 
@@ -1677,7 +1736,7 @@ function reviewPayload_(c, settings) {
   var items = readPhotos_(c)
     .filter(function (p) { return DRIVE_ID_.test(p.id); })
     .map(function (p) {
-      var o = publicPhoto_(p, true);
+      var o = publicPhoto_(p);
       o.hidden = p.hidden;
       return o;
     })
@@ -1698,13 +1757,21 @@ function mediaPiece_(c, params) {
   var mime = file.getMimeType();
   if (offset >= size) return { size: size, offset: offset, mime: mime, data: '' };
   var end = Math.min(size, offset + MEDIA_PIECE) - 1;
-  var res = driveApi_('get', 'https://www.googleapis.com/drive/v3/files/' + id + '?alt=media&supportsAllDrives=true', {
-    headers: { Range: 'bytes=' + offset + '-' + end }
-  });
-  var code = res.getResponseCode();
-  if (code !== 200 && code !== 206) fail_('upload_failed', 'Google Drive didn\'t send the file. Please try again.');
-  var bytes = res.getContent();
-  if (code === 200 && bytes.length > end - offset + 1) bytes = bytes.slice(offset, end + 1);
+  var bytes = null;
+  try {
+    var res = driveApi_('get', 'https://www.googleapis.com/drive/v3/files/' + id + '?alt=media&supportsAllDrives=true', {
+      headers: { Range: 'bytes=' + offset + '-' + end }
+    });
+    var code = res.getResponseCode();
+    if (code === 200 || code === 206) {
+      bytes = res.getContent();
+      if (code === 200 && bytes.length > end - offset + 1) bytes = bytes.slice(offset, end + 1);
+    }
+  } catch (err) {
+    logServerError_(err);
+  }
+  // If Drive's download service isn't available, read the file directly (slower).
+  if (!bytes) bytes = file.getBlob().getBytes().slice(offset, end + 1);
   return { size: size, offset: offset, mime: mime, data: Utilities.base64Encode(bytes) };
 }
 
@@ -1919,6 +1986,11 @@ function dailyTasks() {
     if (albumPublished_(settings)) sendAlbumEmails_(c);
   } catch (err) {
     console.error('Album emails failed: ' + (err && err.message ? err.message : err));
+  }
+  try {
+    cleanUpPieces_(settings, now);
+  } catch (err) {
+    console.error('Cleaning up video pieces failed: ' + (err && err.message ? err.message : err));
   }
 }
 

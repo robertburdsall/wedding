@@ -2,8 +2,9 @@
 // camera link (or scan the QR code on their table) and take photos and videos right on the page
 // (js/camera.js), or add photos from their phone, with an optional filter (including the silly
 // ones in js/fun.js). Everything is saved to Google Drive through the Apps Script
-// (apps-script/Code.gs) and listed on the "Photos" tab of the Sheet; filters are saved by name
-// (plus where the faces are, for the silly ones), and the files stay the unfiltered originals.
+// (apps-script/Code.gs) and listed on the "Photos" tab of the Sheet; filters are saved by name,
+// and the files stay the unfiltered originals. Guests can remove what they shared until the
+// album is published.
 // Until the couple publishes the album, each guest only sees their own photos and videos.
 (function () {
   'use strict';
@@ -258,17 +259,8 @@
 
   /* ---------- silly filters (js/fun.js) ---------- */
 
-  // Whether a photo or video has a silly filter we can draw (face filters need the face positions
-  // saved when it was taken; tacos and hearts don't).
-  function funFor(p) {
-    if (!Fun || !Fun.isSilly(p.filter)) return false;
-    if (!Fun.needsFaces(p.filter)) return true;
-    return !!((p.faces && p.faces.length) || (p.track && p.track.f && p.track.f.length));
-  }
-  function facesFor(p, t) {
-    if (isVideo(p)) return Fun.facesAt(p.track, t);
-    return p.faces || [];
-  }
+  // Whether a photo or video has a silly filter (tacos or hearts) to draw on top.
+  const funFor = (p) => !!(Fun && Fun.isSilly(p.filter));
 
   // Draws the silly filter in a canvas laid over `media` (an <img> or <video>), matching how the
   // picture fits its box ('cover' for the grid, 'contain' in the full-screen view).
@@ -284,7 +276,7 @@
     const mh = media.videoHeight || media.naturalHeight || p.h || hgt;
     const s = fit === 'cover' ? Math.max(w / mw, hgt / mh) : Math.min(w / mw, hgt / mh);
     const box = { x: (w - mw * s) / 2, y: (hgt - mh * s) / 2, w: mw * s, h: mh * s };
-    Fun.draw(ctx, p.filter, facesFor(p, t), box, t);
+    Fun.draw(ctx, p.filter, box, t);
   }
 
   document.querySelectorAll('[data-sort]').forEach((btn) => {
@@ -398,7 +390,7 @@
         store.set('wedding.cameraMode', shot.kind);
         if (shot.kind === 'photo') {
           const prepared = { blob: shot.blob, width: shot.width, height: shot.height, takenAt: shot.takenAt, previewUrl: URL.createObjectURL(shot.blob) };
-          addUpload({ kind: 'photo', file: shot.blob, prepared, faces: shot.faces }, from, '', shot.filter);
+          addUpload({ kind: 'photo', file: shot.blob, prepared }, from, '', shot.filter);
         } else {
           addUpload({ kind: 'video', video: shot }, from, '', shot.filter);
         }
@@ -580,14 +572,6 @@
     try {
       prepared = item.prepared || await T.preparePhoto(item.file);
       item.prepared = prepared;
-      // A photo from the camera roll with a face filter: find the faces now.
-      if (!item.faces && Fun && Fun.needsFaces(item.filter)) {
-        try {
-          const bitmap = await createImageBitmap(prepared.blob);
-          item.faces = await Fun.detectImage(bitmap);
-          bitmap.close();
-        } catch (err) { item.faces = []; }
-      }
     } catch (err) {
       return fail(item, "This photo couldn't be opened on this phone. Try a different one.", false);
     }
@@ -599,7 +583,6 @@
       code, data: base64, from: item.from, caption: item.caption, table,
       takenAt: prepared.takenAt ? prepared.takenAt.toISOString() : '',
       width: prepared.width, height: prepared.height, uploadId: item.id, me, device, filter: item.filter,
-      faces: Fun && Fun.needsFaces(item.filter) ? item.faces || [] : undefined,
     };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -608,14 +591,14 @@
         if (res && res.you) data.you = res.you;
         update(item);
         renderAllowance();
-        if (res && res.photo && res.photo.id) addToTimeline({ ...res.photo, faces: res.photo.faces || item.faces }, prepared.previewUrl);
+        if (res && res.photo && res.photo.id) addToTimeline(res.photo, prepared.previewUrl);
         item.prepared = null; // let the phone free the memory
         return;
       } catch (err) {
         if (err && err.code === 'limit_reached' && data.you) data.you.left = 0;
         if (err && NO_RETRY.has(err.code)) return fail(item, err.message || 'This photo could not be shared.', false);
         if (attempt < 2) await sleep(3000 * (attempt + 1));
-        else return fail(item, 'The connection dropped.', true);
+        else return fail(item, failText(err), true);
       }
     }
   }
@@ -632,7 +615,6 @@
     const meta = {
       ...base, mime: v.mime, size: v.blob.size, seconds: v.seconds, width: v.width, height: v.height, filter: item.filter,
       takenAt: v.takenAt ? v.takenAt.toISOString() : '', from: item.from, caption: item.caption, table, me, device,
-      track: Fun && Fun.needsFaces(item.filter) && v.track ? v.track : undefined,
     };
     // Retries one step a few times when the connection hiccups.
     async function step(payload) {
@@ -670,7 +652,7 @@
         if (r.photo && r.photo.id) {
           const posterUrl = v.poster ? URL.createObjectURL(v.poster) : '';
           localVideo.set(r.photo.id, URL.createObjectURL(v.blob));
-          addToTimeline({ ...r.photo, track: r.photo.track || v.track }, posterUrl);
+          addToTimeline(r.photo, posterUrl);
         }
         item.video = { ...v, blob: null, poster: null }; // let the phone free the memory
         return;
@@ -678,10 +660,17 @@
         if (err && err.code === 'limit_reached' && data.you && data.you.videos) data.you.videos.left = 0;
         if (err && NO_RETRY.has(err.code)) return fail(item, err.message || 'This video could not be shared.', false);
         if (err && (err.code === 'upload_expired' || err.code === 'upload_incomplete')) { item.progress = 0; continue; } // start over
-        return fail(item, 'The connection dropped.', true);
+        return fail(item, failText(err), true);
       }
     }
     return fail(item, 'The connection dropped.', true);
+  }
+
+  // What to tell the guest when sharing didn't work (with the server's own reason, if any, so
+  // it can be passed on to us).
+  function failText(err) {
+    if (!err || err.code === 'network') return 'The connection dropped.';
+    return err.detail ? `${err.message} (${err.detail})` : err.message || 'Something went wrong.';
   }
 
   function fail(item, message, canRetry) {
@@ -750,7 +739,7 @@
     }, { once: true });
     v.src = mine || T.videoUrl(p.id);
     if (funFor(p)) {
-      // Draw the silly filter over the video as it plays, following the faces.
+      // Draw the silly filter (tacos or hearts) over the video as it plays.
       const c = h('canvas', { class: 'fun-wrap__canvas', 'aria-hidden': 'true' });
       lightboxVideo.append(h('div', { class: 'fun-wrap' }, v, c));
       const frame = () => {
@@ -798,7 +787,39 @@
     caption.textContent = '';
     if (p.caption) caption.append(h('span', { class: 'photo-lightbox__note', text: p.caption }));
     if (meta) caption.append(h('span', { class: 'photo-lightbox__meta', text: meta }));
+    // Before the album is published, everything here is the guest's own: they can take it back.
+    const remove = $('#lightbox-remove');
+    remove.hidden = !!(data.album && data.album.published);
+    remove.disabled = false;
+    remove.textContent = `Remove this ${what.toLowerCase()}`;
   }
+
+  $('#lightbox-remove').addEventListener('click', async () => {
+    const p = shown[current];
+    if (!p) return;
+    const what = isVideo(p) ? 'video' : 'photo';
+    if (!confirm(`Remove this ${what}? It will be deleted, and you'll get it back as one of your ${what}s.`)) return;
+    const btn = $('#lightbox-remove');
+    btn.disabled = true;
+    btn.textContent = 'Removing…';
+    try {
+      const res = await API.deleteUpload({ code, id: p.id, me, device });
+      if (res && res.you) data.you = res.you;
+    } catch (err) {
+      if (!(err && err.code === 'not_found')) { // already gone is fine
+        btn.disabled = false;
+        btn.textContent = `Remove this ${what}`;
+        alert(err && err.message ? err.message : "That didn't work. Please try again.");
+        return;
+      }
+    }
+    photos = photos.filter((x) => x.id !== p.id);
+    if (waiting) waiting.photos = waiting.photos.filter((x) => x.id !== p.id);
+    local.delete(p.id);
+    localVideo.delete(p.id);
+    closeLightbox();
+    render();
+  });
   function openLightbox(i) {
     showPhoto(i);
     lightbox.hidden = false;

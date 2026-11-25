@@ -2,12 +2,12 @@
 // iPhone camera. "Photo" / "Video" under the picture switches between them (or swipe), the
 // last shot sits bottom left, and the switch-camera button bottom right.
 //
-// Filters are shown live, but what's saved is always the original, unfiltered picture: only
-// the filter's name goes with it, plus (for the silly ones, see js/fun.js) where the faces are.
+// Filters are shown live (including the tacos and hearts from js/fun.js), but what's saved is
+// always the original, unfiltered picture: only the filter's name goes with it.
 //
 // Camera.open({ filter, mode, left(), maxSeconds, onCapture, onClose }) shows it. onCapture gets
-//   { kind: 'photo', blob, width, height, takenAt, filter, faces } right after each photo, or
-//   { kind: 'video', blob, mime, seconds, width, height, poster, takenAt, filter, track } once a
+//   { kind: 'photo', blob, width, height, takenAt, filter } right after each photo, or
+//   { kind: 'video', blob, mime, seconds, width, height, poster, takenAt, filter } once a
 //   video is accepted. left() returns { photo, video }: how many of each the guest has left.
 window.Camera = (function () {
   'use strict';
@@ -24,7 +24,6 @@ window.Camera = (function () {
   ];
   const VIDEO_BITS = 2500000; // about 10 MB for 30 seconds
   const MIN_SECONDS = 1;
-  const DETECT_MS = 90; // look for faces about 10 times a second
 
   function recordingType() {
     if (!window.MediaRecorder) return null;
@@ -46,11 +45,7 @@ window.Camera = (function () {
   let recStart = 0;
   let takenAt = null;
   let tick = null;
-  let track = null;     // faces while recording
   let review = null;    // a recorded video waiting for Use / Retake
-  let faces = [];       // the latest faces in the live picture
-  let detecting = false;
-  let lastDetect = 0;
   let raf = 0;
   let shots = 0;
   const el = {};
@@ -167,7 +162,6 @@ window.Camera = (function () {
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = null;
     if (el.live) el.live.srcObject = null;
-    faces = [];
   }
 
   async function setMode(next) {
@@ -205,11 +199,6 @@ window.Camera = (function () {
     const css = T.filterCss(filter);
     el.live.style.filter = css;
     el.replay.style.filter = css;
-    if (Fun && Fun.needsFaces(filter)) {
-      say('Loading the fun filters…');
-      Fun.loadDetector().then(() => { if (el.message.textContent.startsWith('Loading the fun')) say(''); })
-        .catch(() => say("The face filters couldn't load here. The others still work."));
-    }
   }
 
   // Where the picture actually sits on screen (it's cropped to fill, like a phone camera).
@@ -219,8 +208,7 @@ window.Camera = (function () {
     return { x: (cw - vw * s) / 2, y: (ch - vh * s) / 2, w: vw * s, h: vh * s };
   }
 
-  // Draws the silly filter over the live picture (or the video being reviewed) every frame,
-  // and keeps looking for faces while a face filter is on.
+  // Draws the silly filter over the live picture (or the video being reviewed) every frame.
   function loop() {
     cancelAnimationFrame(raf);
     const t0 = performance.now();
@@ -236,26 +224,13 @@ window.Camera = (function () {
       if (!Fun || !Fun.isSilly(filter)) return;
       ctx.scale(dpr, dpr);
       if (review) {
-        const at = el.replay.currentTime;
-        Fun.draw(ctx, filter, Fun.facesAt(review.track, at), coverBox(el.replay, cw, ch, true), at);
+        Fun.draw(ctx, filter, coverBox(el.replay, cw, ch, true), el.replay.currentTime);
         return;
       }
       if (!stream || !el.live.videoWidth) return;
-      if (Fun.needsFaces(filter)) findFaces();
-      Fun.draw(ctx, filter, faces, coverBox(el.live, cw, ch, false), (performance.now() - t0) / 1000);
+      Fun.draw(ctx, filter, coverBox(el.live, cw, ch, false), (performance.now() - t0) / 1000);
     };
     raf = requestAnimationFrame(frame);
-  }
-
-  function findFaces() {
-    const now = performance.now();
-    if (detecting || now - lastDetect < DETECT_MS || el.live.readyState < 2) return;
-    detecting = true;
-    lastDetect = now;
-    Fun.detectVideo(el.live).then((found) => {
-      faces = found;
-      if (recorder && track) track.add((performance.now() - recStart) / 1000, found);
-    }).catch(() => {}).finally(() => { detecting = false; });
   }
 
   /* ---------- taking photos ---------- */
@@ -283,19 +258,15 @@ window.Camera = (function () {
     const when = new Date();
     const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.9));
     if (!blob) { say("That photo didn't work. Please try again."); return; }
-    let found = [];
-    if (Fun && Fun.needsFaces(filter)) {
-      try { found = await Fun.detectImage(c); } catch (err) { found = faces; }
-    }
     c.width = c.height = 0;
     shots++;
-    showLast(blob, filter, found, width, height);
-    if (opts.onCapture) opts.onCapture({ kind: 'photo', blob, width, height, takenAt: when, filter, faces: found });
+    showLast(blob, filter);
+    if (opts.onCapture) opts.onCapture({ kind: 'photo', blob, width, height, takenAt: when, filter });
     showStatus();
   }
 
   // The little picture bottom left: the last thing taken, with its filter.
-  function showLast(blob, name, found, w, h) {
+  function showLast(blob, name) {
     const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = () => {
@@ -308,7 +279,7 @@ window.Camera = (function () {
       ctx.filter = T.filterCss(name);
       ctx.drawImage(img, box.x, box.y, box.w, box.h);
       ctx.filter = 'none';
-      if (Fun) Fun.draw(ctx, name, found, box, 1.3);
+      if (Fun) Fun.draw(ctx, name, box, 1.3);
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -331,7 +302,6 @@ window.Camera = (function () {
     }
     recorder.addEventListener('dataavailable', (e) => { if (e.data && e.data.size) pieces.push(e.data); });
     recorder.addEventListener('stop', finished, { once: true });
-    track = Fun && Fun.needsFaces(filter) ? Fun.tracker() : null;
     recorder.start(1000);
     recStart = performance.now();
     takenAt = new Date();
@@ -364,8 +334,6 @@ window.Camera = (function () {
     recorder = null;
     const blob = new Blob(pieces, { type: type.split(';')[0] });
     pieces = [];
-    const faceTrack = track ? track.done(seconds) : null;
-    track = null;
     if (seconds < MIN_SECONDS || !blob.size) {
       say('That was too quick. Tap the button to start, and again to stop.');
       setTimeout(() => say(''), 2500);
@@ -375,7 +343,7 @@ window.Camera = (function () {
     say('Getting it ready…');
     const still = await T.videoStill(blob);
     say('');
-    review = { blob, mime: blob.type, seconds, width: still.width, height: still.height, poster: still.poster, takenAt, track: faceTrack };
+    review = { blob, mime: blob.type, seconds, width: still.width, height: still.height, poster: still.poster, takenAt };
     // Look it over with the camera paused (saves battery while they decide).
     stopCamera();
     el.replay.src = URL.createObjectURL(blob);
@@ -412,7 +380,7 @@ window.Camera = (function () {
     const out = { kind: 'video', ...review, filter };
     review = null;
     shots++;
-    if (out.poster) showLast(out.poster, filter, Fun ? Fun.facesAt(out.track, 0.1) : [], out.width, out.height);
+    if (out.poster) showLast(out.poster, filter);
     showLive();
     startCamera();
     if (opts.onCapture) opts.onCapture(out);

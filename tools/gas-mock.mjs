@@ -151,6 +151,7 @@ export class MockSheet {
     return this;
   }
   insertRowBefore(r) { this.data.splice(r - 1, 0, []); return this; }
+  deleteRow(r) { this.data.splice(r - 1, 1); return this; }
   clear() { this.data = []; return this; }
   setFrozenRows(n) { this.frozenRows = n; return this; }
   getActiveRangeList() { return { getRanges: () => this.ss.activeRanges } ; }
@@ -232,7 +233,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
   function makeFile(blob, folder) {
     const file = {
       id: driveId(), name: blob.getName(), bytes: blob.bytes, contentType: blob.getContentType(), folder: folder.id,
-      sharing: null, trashed: false, description: '',
+      sharing: null, trashed: false, description: '', created: new Date(Date.now() + cache.offsetMs),
       getId() { return this.id; },
       getName() { return this.name; },
       getUrl() { return `https://drive.google.com/file/d/${this.id}/view?usp=drivesdk`; },
@@ -243,6 +244,11 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
       },
       setTrashed(v) { this.trashed = !!v; return this; },
       getSize() { return this.bytes.length; },
+      getDateCreated() { return new Date(this.created.getTime()); },
+      getBlob() {
+        const bytes = this.bytes;
+        return { getBytes: () => Array.from(bytes, (b) => (b > 127 ? b - 256 : b)), getDataAsString: () => bytes.toString('utf8'), getContentType: () => this.contentType };
+      },
       getMimeType() { return this.contentType; },
       moveTo(folder) { this.folder = folder.id; return this; },
       setDescription(d) { this.description = d; return this; },
@@ -256,7 +262,19 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
       getId() { return this.id; },
       getName() { return this.name; },
       getUrl() { return `https://drive.google.com/drive/folders/${this.id}`; },
-      createFile(blob) { return makeFile(blob, this); },
+      // createFile(blob), or createFile(name, text, mimeType) like Apps Script.
+      createFile(blob, text, mimeType) {
+        if (typeof blob === 'string') {
+          const name = blob;
+          blob = { getName: () => name, bytes: Buffer.from(String(text), 'utf8'), getContentType: () => mimeType || 'text/plain' };
+        }
+        return makeFile(blob, this);
+      },
+      getFiles() {
+        const list = [...drive.files.values()].filter((f) => f.folder === this.id && !f.trashed);
+        let i = 0;
+        return { hasNext: () => i < list.length, next: () => list[i++] };
+      },
       sharing: null,
       setSharing(access, permission) { this.sharing = { access, permission }; return this; },
     };
@@ -382,6 +400,7 @@ export function createGas({ timeZone = 'America/New_York', quota = 100, ownerEma
             getContent: () => Array.from(buf, (b) => (b > 127 ? b - 256 : b)),
           };
         };
+        if (drive.throwFetch) throw new Error('You do not have permission to call UrlFetchApp.fetch. Required permissions: https://www.googleapis.com/auth/script.external_request');
         if (headers.Authorization !== 'Bearer mock-oauth-token') return respond(401, {}, 'Login required');
         if (params.muteHttpExceptions !== true) throw new Error('mock: always pass muteHttpExceptions');
         if (method === 'post' && url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable')) {
